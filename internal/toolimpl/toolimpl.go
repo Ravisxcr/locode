@@ -38,27 +38,98 @@ type Registry struct {
 // NewRegistry creates a Registry with all built-in tool implementations.
 func NewRegistry() *Registry {
 	r := &Registry{executors: make(map[string]ToolExecutor)}
-	r.executors["bashtool"] = &BashTool{}
-	r.executors["filereadtool"] = &FileReadTool{}
-	r.executors["fileedittool"] = &FileEditTool{}
-	r.executors["filewritetool"] = &FileWriteTool{}
-	r.executors["globtool"] = &GlobTool{}
-	r.executors["greptool"] = &GrepTool{}
-	r.executors["listdirectorytool"] = &ListDirectoryTool{}
-	r.executors["webfetchtool"] = &WebFetchTool{}
-	r.executors["websearchtool"] = &WebSearchTool{}
-	r.executors["notebookedittool"] = &FileEditTool{} // .ipynb files are JSON
+	bash := &BashTool{}
+	fileRead := &FileReadTool{}
+	fileEdit := &FileEditTool{}
+	fileWrite := &FileWriteTool{}
+	glob := &GlobTool{}
+	grep := &GrepTool{}
+	listDir := &ListDirectoryTool{}
+	webFetch := &WebFetchTool{}
+	webSearch := &WebSearchTool{}
+
+	r.executors["bashtool"] = bash
+	r.executors["bash"] = bash
+	r.executors["sh"] = bash
+	r.executors["shell"] = bash
+	r.executors["exec"] = bash
+
+	r.executors["filereadtool"] = fileRead
+	r.executors["fileread"] = fileRead
+	r.executors["file_read"] = fileRead
+	r.executors["read_file"] = fileRead
+	r.executors["readfile"] = fileRead
+	r.executors["view_file"] = fileRead
+	r.executors["viewfile"] = fileRead
+	r.executors["read"] = fileRead
+	r.executors["cat"] = fileRead
+
+	r.executors["fileedittool"] = fileEdit
+	r.executors["fileedit"] = fileEdit
+	r.executors["file_edit"] = fileEdit
+	r.executors["edit_file"] = fileEdit
+	r.executors["editfile"] = fileEdit
+	r.executors["edit"] = fileEdit
+	r.executors["replace_file_content"] = fileEdit
+	r.executors["replacefilecontent"] = fileEdit
+	r.executors["notebookedittool"] = fileEdit
+
+	r.executors["filewritetool"] = fileWrite
+	r.executors["filewrite"] = fileWrite
+	r.executors["file_write"] = fileWrite
+	r.executors["write_file"] = fileWrite
+	r.executors["writefile"] = fileWrite
+	r.executors["create_file"] = fileWrite
+	r.executors["write"] = fileWrite
+
+	r.executors["globtool"] = glob
+	r.executors["glob"] = glob
+	r.executors["find_by_name"] = glob
+	r.executors["findbyname"] = glob
+	r.executors["find"] = glob
+
+	r.executors["greptool"] = grep
+	r.executors["grep"] = grep
+	r.executors["grep_search"] = grep
+	r.executors["grepsearch"] = grep
+	r.executors["search"] = grep
+
+	r.executors["listdirectorytool"] = listDir
+	r.executors["listdirectory"] = listDir
+	r.executors["list_dir"] = listDir
+	r.executors["listdir"] = listDir
+	r.executors["list_directory"] = listDir
+	r.executors["ls"] = listDir
+
+	r.executors["webfetchtool"] = webFetch
+	r.executors["webfetch"] = webFetch
+	r.executors["web_fetch"] = webFetch
+	r.executors["fetch"] = webFetch
+
+	r.executors["websearchtool"] = webSearch
+	r.executors["websearch"] = webSearch
+	r.executors["web_search"] = webSearch
+
 	return r
 }
 
 // Set registers (or replaces) the executor for the given tool name.
 func (r *Registry) Set(name string, executor ToolExecutor) {
-	r.executors[strings.ToLower(name)] = executor
+	r.executors[strings.ToLower(strings.TrimSpace(name))] = executor
 }
 
-// Get returns the executor for the given tool name (case-insensitive), or nil.
+// Get returns the executor for the given tool name (case-insensitive and alias-tolerant), or nil.
 func (r *Registry) Get(name string) ToolExecutor {
-	return r.executors[strings.ToLower(name)]
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if ex, ok := r.executors[lower]; ok {
+		return ex
+	}
+	// Try without underscores/hyphens
+	stripped := strings.ReplaceAll(strings.ReplaceAll(lower, "_", ""), "-", "")
+	if ex, ok := r.executors[stripped]; ok {
+		return ex
+	}
+	return nil
 }
 
 // ExecuteTool parses a JSON payload string and dispatches to the named tool.

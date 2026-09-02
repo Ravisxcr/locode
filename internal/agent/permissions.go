@@ -1,5 +1,7 @@
 package agent
 
+import "strings"
+
 // PermissionMode governs what operations are allowed.
 type PermissionMode int
 
@@ -32,7 +34,11 @@ func (p *PermissionPolicy) Authorize(toolName string, input string) (bool, strin
 	if p.Trusted != nil && p.Trusted.IsTrusted(toolName, input) {
 		return true, ""
 	}
-	// In WorkspaceWrite mode, prompt the user if a prompter is available
+	// In WorkspaceWrite mode, read-only tools are auto-approved to allow autonomous exploration
+	if p.Mode == WorkspaceWrite && IsReadOnlyTool(toolName) {
+		return true, ""
+	}
+	// In WorkspaceWrite mode, prompt the user for mutating/exec tools if a prompter is available
 	if p.Prompter != nil {
 		allowed, err := p.Prompter.Prompt(toolName, input)
 		if err != nil {
@@ -43,6 +49,24 @@ func (p *PermissionPolicy) Authorize(toolName string, input string) (bool, strin
 		}
 	}
 	return true, ""
+}
+
+// IsReadOnlyTool returns true if the tool only reads from or searches the workspace/environment.
+func IsReadOnlyTool(toolName string) bool {
+	clean := strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(toolName, "_", ""), "-", ""))
+	switch clean {
+	case "filereadtool", "fileread", "readfile", "viewfile", "cat", "read",
+		"globtool", "glob", "findbyname", "find",
+		"greptool", "grep", "grepsearch", "search",
+		"listdirectorytool", "listdir", "listdirectory", "ls",
+		"websearchtool", "websearch",
+		"webfetchtool", "webfetch", "fetch",
+		"astgrep", "astgreptool",
+		"ragsearch", "ragcodecontext", "ragsearchtool":
+		return true
+	default:
+		return false
+	}
 }
 
 // AllowAllPrompter always allows tool execution.

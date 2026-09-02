@@ -497,16 +497,25 @@ func (r *REPL) Run(ctx context.Context) error {
 		for ev := range eventCh {
 			if ev.Kind == "error" && ev.BlockDelta != nil {
 				spin.Stop()
-				fmt.Fprintf(r.writer, "%s%s%s\n", cRed, ev.BlockDelta.Text, ansiReset)
+				fmt.Fprintf(r.writer, "\n%s%s%s\n", cRed, ev.BlockDelta.Text, ansiReset)
 				firstToken = false
 				continue
 			}
+			if ev.Kind == "message_stop" {
+				firstToken = true
+			}
 			if firstToken {
-				isText := (ev.Kind == "content_block_delta" && ev.BlockDelta != nil && ev.BlockDelta.Kind == "text_delta")
-				isTextStart := (ev.Kind == "content_block_start" && ev.ContentBlock != nil && ev.ContentBlock.Kind == "text")
-				if isText || isTextStart {
+				isText := (ev.Kind == "content_block_delta" && ev.BlockDelta != nil && (ev.BlockDelta.Kind == "text_delta" || ev.BlockDelta.Kind == "thinking_delta"))
+				isStart := (ev.Kind == "content_block_start")
+				if isText || isStart {
 					spin.Stop()
-					fmt.Fprintf(r.writer, "%sassistant>%s ", cBlue+ansiBold, ansiReset)
+					if isText && ev.BlockDelta.Kind == "text_delta" {
+						// Don't print assistant> if this text is raw JSON tool invocation
+						trimmed := strings.TrimSpace(ev.BlockDelta.Text)
+						if !strings.HasPrefix(trimmed, "{\"name\"") && !strings.HasPrefix(trimmed, "{\"tool\"") {
+							fmt.Fprintf(r.writer, "%sassistant>%s ", cBlue+ansiBold, ansiReset)
+						}
+					}
 					firstToken = false
 				}
 			}
@@ -969,14 +978,18 @@ func (t *TerminalToolCallback) OnToolStart(name string, input map[string]interfa
 	}
 	// Show tool name with key params for visibility
 	summary := summarizeToolInput(name, input)
-	fmt.Fprintf(t.Writer, "  %s⚡ %s%s%s %s\n", cBlue, cWhite+ansiBold, name, ansiReset, summary)
+	if summary != "" {
+		fmt.Fprintf(t.Writer, "\n  %s⚡ %s%s%s %s\n", cBlue, cWhite+ansiBold, name, ansiReset, cGray+summary+ansiReset)
+	} else {
+		fmt.Fprintf(t.Writer, "\n  %s⚡ %s%s%s\n", cBlue, cWhite+ansiBold, name, ansiReset)
+	}
 }
 
 func (t *TerminalToolCallback) OnToolEnd(name string, success bool) {
 	if success {
-		fmt.Fprintf(t.Writer, "  %s✓ %s%s\n", cGreen, name, ansiReset)
+		fmt.Fprintf(t.Writer, "  %s✓ %s completed%s\n\n", cGreen, name, ansiReset)
 	} else {
-		fmt.Fprintf(t.Writer, "  %s✗ %s%s\n", cRed, name, ansiReset)
+		fmt.Fprintf(t.Writer, "  %s✗ %s failed%s\n\n", cRed, name, ansiReset)
 	}
 	// Restart spinner for the next LLM call
 	if t.Spinner != nil {
@@ -1166,12 +1179,26 @@ func BuildSystemPrompt(tools []apitypes.ToolDef) string {
 
 IMPORTANT: You should be proactive in accomplishing the task, not reactive. Do not wait for the user to ask you to do something that you can anticipate.
 
-# Language Rules
+# Language & Response Rules
 
-- ALL tool calls, search queries, and internal reasoning MUST be in English. Always translate the user's intent to English before calling any tool.
-- Respond to the user in whatever language they use. If they write in Indonesian, respond in Indonesian. If English, respond in English.
-- When using WebSearchTool, ALWAYS write the query in English. Example: user says "siapa presiden indonesia" → search for "president of Indonesia 2026".
-- When reading tool results, extract ALL relevant information. Do not ignore parts of the results. Read every line carefully.
+- Always communicate and respond in English by default (unless the user explicitly requests another language).
+- All tool calls, search queries, code, and comments MUST be written in English.
+- When reading tool results, extract all relevant details and read every line carefully.
+
+# Autonomous Codebase Discovery & Investigation
+
+You are directly embedded inside the user's project workspace at %s.
+- When asked "what is this project about?", "what does this codebase do?", "explain the architecture", or any question about the project:
+  1. NEVER say "I don't have access to your project", "I lack context", or ask the user to explain.
+  2. IMMEDIATELY invoke your tools ('FileReadTool' on README.md / go.mod / package.json, 'GlobTool' / 'ListDirectoryTool', 'rag_code_context', or 'rag_search') in the very same turn.
+  3. Inspect the actual repository files first and provide a detailed, accurate explanation.
+- When investigating bugs, inspecting architecture, or finding implementations, ALWAYS check the repository files first before responding.
+
+# Critical Execution Mandate
+
+1. **NEVER Narrate Without Calling Tools**: Never output "Let's start by reading...", "I will check...", or "Let me inspect the README.md" without executing the tool call in that turn. You must directly invoke the tool call.
+2. **Action-First Execution**: If you need to read a file, list directory contents, or run a search, emit the tool call directly.
+3. Every step where you plan to investigate or read code must output the corresponding tool call.
 
 # Tool Use
 
@@ -1179,9 +1206,8 @@ You have tools at your disposal to solve the coding task. Follow these rules reg
 
 1. ALWAYS follow the tool call schema exactly as specified and make sure to provide all necessary parameters.
 2. The conversation may reference tools that are no longer available. NEVER call tools that are not explicitly provided.
-3. **NEVER refer to tool names when speaking to the user.** For example, instead of saying "I need to use the BashTool to run a command", just say "Let me run that command" or simply run it.
-4. Only call tools when they are necessary. If the user's task is conversational or does not require tool use, respond without calling tools.
-5. When you need information, prefer using tools over asking the user.
+3. Only call tools when they are necessary. If the user's question is purely greeting/small talk ("hello", "how are you"), respond concisely without tools. For any question involving code or the project, invoke your tools immediately.
+4. When you need information about files, the project, or code, prefer using tools over asking the user.
 
 # Tool Use Best Practices
 
@@ -1235,7 +1261,7 @@ If the first search doesn't give a clear answer, you MUST search again with a di
 
 # Available Tools
 
-%s`, cwd, osName, shell, currentDate, currentDate, toolList.String()))
+%s`, cwd, cwd, osName, shell, currentDate, currentDate, toolList.String()))
 
 	// Git context
 	if branch, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {

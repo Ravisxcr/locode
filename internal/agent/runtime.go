@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/Ravisxcr/gocode-rag/internal/apiclient"
 	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
@@ -122,6 +124,25 @@ func (r *ConversationRuntime) sendLoop(ctx context.Context) (*apitypes.MessageRe
 				pendingTools = append(pendingTools, toolUseInfo{id: block.ID, name: block.Name, input: block.Input})
 			}
 		}
+
+		// Fallback tool extraction for models that output tool calls in text
+		if len(pendingTools) == 0 {
+			pendingTools = extractFallbackTools(resp.Content)
+			for _, tu := range pendingTools {
+				hasUse := false
+				for _, b := range assistantMsg.Content {
+					if b.Kind == "tool_use" && b.ID == tu.id {
+						hasUse = true
+						break
+					}
+				}
+				if !hasUse {
+					assistantMsg.Content = append(assistantMsg.Content, apitypes.InputContentBlock{
+						Kind: "tool_use", ID: tu.id, Name: tu.name, Input: tu.input,
+					})
+				}
+			}
+		}
 		r.session = append(r.session, assistantMsg)
 
 		// No tool calls — we're done
@@ -129,11 +150,21 @@ func (r *ConversationRuntime) sendLoop(ctx context.Context) (*apitypes.MessageRe
 			return resp, nil
 		}
 
-		// Execute each tool
+		// Execute each tool and batch results into a single user message
+		var toolResultBlocks []apitypes.InputContentBlock
 		for _, tu := range pendingTools {
 			result := r.executeTool(tu)
-			r.session = append(r.session, apitypes.UserToolResult(tu.id, result.Output, result.IsError))
+			toolResultBlocks = append(toolResultBlocks, apitypes.InputContentBlock{
+				Kind:      "tool_result",
+				ToolUseID: tu.id,
+				Content:   result.Output,
+				IsError:   result.IsError,
+			})
 		}
+		r.session = append(r.session, apitypes.InputMessage{
+			Role:    "user",
+			Content: toolResultBlocks,
+		})
 	}
 
 	// Max iterations exceeded
@@ -209,8 +240,14 @@ func (r *ConversationRuntime) streamLoop(ctx context.Context) (<-chan apitypes.S
 						block := &contentBlocks[ev.Index]
 						switch ev.BlockDelta.Kind {
 						case "text_delta":
+							if block.Kind == "" {
+								block.Kind = "text"
+							}
 							block.Text += ev.BlockDelta.Text
 						case "input_json_delta":
+							if block.Kind == "" {
+								block.Kind = "tool_use"
+							}
 							block.Input = appendJSON(block.Input, ev.BlockDelta.PartialJSON)
 						}
 					}
@@ -223,6 +260,22 @@ func (r *ConversationRuntime) streamLoop(ctx context.Context) (<-chan apitypes.S
 
 			r.usage.Add(currentUsage)
 
+			// 1. Collect native tool calls from contentBlocks
+			for _, block := range contentBlocks {
+				if block.Kind == "tool_use" {
+					pendingTools = append(pendingTools, toolUseInfo{
+						id:    block.ID,
+						name:  block.Name,
+						input: block.Input,
+					})
+				}
+			}
+
+			// 2. If no native tool calls, attempt fallback tool extraction from text blocks
+			if len(pendingTools) == 0 {
+				pendingTools = extractFallbackTools(contentBlocks)
+			}
+
 			// Build assistant message
 			assistantMsg := apitypes.InputMessage{Role: "assistant"}
 			for _, block := range contentBlocks {
@@ -233,7 +286,22 @@ func (r *ConversationRuntime) streamLoop(ctx context.Context) (<-chan apitypes.S
 					assistantMsg.Content = append(assistantMsg.Content, apitypes.InputContentBlock{
 						Kind: "tool_use", ID: block.ID, Name: block.Name, Input: block.Input,
 					})
-					pendingTools = append(pendingTools, toolUseInfo{id: block.ID, name: block.Name, input: block.Input})
+				}
+			}
+
+			// For fallback tools, ensure corresponding tool_use blocks exist in assistantMsg
+			for _, tu := range pendingTools {
+				hasUse := false
+				for _, b := range assistantMsg.Content {
+					if b.Kind == "tool_use" && b.ID == tu.id {
+						hasUse = true
+						break
+					}
+				}
+				if !hasUse {
+					assistantMsg.Content = append(assistantMsg.Content, apitypes.InputContentBlock{
+						Kind: "tool_use", ID: tu.id, Name: tu.name, Input: tu.input,
+					})
 				}
 			}
 			r.session = append(r.session, assistantMsg)
@@ -242,13 +310,158 @@ func (r *ConversationRuntime) streamLoop(ctx context.Context) (<-chan apitypes.S
 				return
 			}
 
+			// Execute all tools and batch results into a single user message
+			var toolResultBlocks []apitypes.InputContentBlock
 			for _, tu := range pendingTools {
 				result := r.executeTool(tu)
-				r.session = append(r.session, apitypes.UserToolResult(tu.id, result.Output, result.IsError))
+				toolResultBlocks = append(toolResultBlocks, apitypes.InputContentBlock{
+					Kind:      "tool_result",
+					ToolUseID: tu.id,
+					Content:   result.Output,
+					IsError:   result.IsError,
+				})
 			}
+			r.session = append(r.session, apitypes.InputMessage{
+				Role:    "user",
+				Content: toolResultBlocks,
+			})
 		}
 	}()
 	return outCh, nil
+}
+
+var (
+	xmlToolCallRegex = regexp.MustCompile("(?s)<tool_call>(?:```(?:json)?)?\\s*(\\{.*?\\})\\s*(?:```)?</tool_call>")
+	fencedCodeRegex  = regexp.MustCompile("(?s)```(?:json)?\\s*([\\s\\S]*?)\\s*```")
+	jsonNameFirstRe  = regexp.MustCompile(`(?s)\{\s*"(?:name|tool|tool_name)"\s*:\s*"([^"]+)"\s*,\s*"(?:arguments|parameters|input)"\s*:\s*(\{.*?\})\s*\}`)
+	jsonArgsFirstRe  = regexp.MustCompile(`(?s)\{\s*"(?:arguments|parameters|input)"\s*:\s*(\{.*?\})\s*,\s*"(?:name|tool|tool_name)"\s*:\s*"([^"]+)"\s*\}`)
+)
+
+func parseToolMap(obj map[string]interface{}, id string) *toolUseInfo {
+	name, _ := obj["name"].(string)
+	if name == "" {
+		name, _ = obj["tool"].(string)
+	}
+	if name == "" {
+		name, _ = obj["tool_name"].(string)
+	}
+	if name == "" {
+		return nil
+	}
+	var args json.RawMessage
+	if a, ok := obj["arguments"]; ok {
+		args, _ = json.Marshal(a)
+	} else if p, ok := obj["parameters"]; ok {
+		args, _ = json.Marshal(p)
+	} else if in, ok := obj["input"]; ok {
+		args, _ = json.Marshal(in)
+	} else {
+		args = json.RawMessage("{}")
+	}
+	return &toolUseInfo{
+		id:    id,
+		name:  name,
+		input: args,
+	}
+}
+
+func extractFallbackTools(contentBlocks []apitypes.OutputContentBlock) []toolUseInfo {
+	var tools []toolUseInfo
+	for _, block := range contentBlocks {
+		// Accept "text" or uninitialized "" (from streaming text deltas) with content
+		if (block.Kind != "text" && block.Kind != "") || strings.TrimSpace(block.Text) == "" {
+			continue
+		}
+
+		text := strings.TrimSpace(block.Text)
+
+		// 1. Check direct JSON object or array
+		var directObj map[string]interface{}
+		if err := json.Unmarshal([]byte(text), &directObj); err == nil {
+			if t := parseToolMap(directObj, fmt.Sprintf("call_%d", len(tools)+1)); t != nil {
+				tools = append(tools, *t)
+				continue
+			}
+		}
+		var directArr []map[string]interface{}
+		if err := json.Unmarshal([]byte(text), &directArr); err == nil {
+			for _, obj := range directArr {
+				if t := parseToolMap(obj, fmt.Sprintf("call_%d", len(tools)+1)); t != nil {
+					tools = append(tools, *t)
+				}
+			}
+			if len(tools) > 0 {
+				continue
+			}
+		}
+
+		// 2. Fenced code blocks ```json {...} ``` anywhere in text
+		fencedMatches := fencedCodeRegex.FindAllStringSubmatch(text, -1)
+		for _, fm := range fencedMatches {
+			if len(fm) >= 2 {
+				fencedBody := strings.TrimSpace(fm[1])
+				var fObj map[string]interface{}
+				if err := json.Unmarshal([]byte(fencedBody), &fObj); err == nil {
+					if t := parseToolMap(fObj, fmt.Sprintf("call_%d", len(tools)+1)); t != nil {
+						tools = append(tools, *t)
+					}
+				} else {
+					var fArr []map[string]interface{}
+					if err := json.Unmarshal([]byte(fencedBody), &fArr); err == nil {
+						for _, obj := range fArr {
+							if t := parseToolMap(obj, fmt.Sprintf("call_%d", len(tools)+1)); t != nil {
+								tools = append(tools, *t)
+							}
+						}
+					}
+				}
+			}
+		}
+		if len(tools) > 0 {
+			continue
+		}
+
+		// 3. XML tags: <tool_call>...</tool_call>
+		xmlMatches := xmlToolCallRegex.FindAllStringSubmatch(text, -1)
+		for _, m := range xmlMatches {
+			if len(m) >= 2 {
+				var parsed map[string]interface{}
+				if err := json.Unmarshal([]byte(m[1]), &parsed); err == nil {
+					if t := parseToolMap(parsed, fmt.Sprintf("call_%d", len(tools)+1)); t != nil {
+						tools = append(tools, *t)
+					}
+				}
+			}
+		}
+		if len(tools) > 0 {
+			continue
+		}
+
+		// 4. Embedded regex patterns
+		// Regex 1: name first
+		for _, m := range jsonNameFirstRe.FindAllStringSubmatch(text, -1) {
+			if len(m) >= 3 {
+				tools = append(tools, toolUseInfo{
+					id:    fmt.Sprintf("call_%d", len(tools)+1),
+					name:  m[1],
+					input: json.RawMessage(m[2]),
+				})
+			}
+		}
+		// Regex 2: arguments first (m[1] is args, m[2] is name)
+		if len(tools) == 0 {
+			for _, m := range jsonArgsFirstRe.FindAllStringSubmatch(text, -1) {
+				if len(m) >= 3 {
+					tools = append(tools, toolUseInfo{
+						id:    fmt.Sprintf("call_%d", len(tools)+1),
+						name:  m[2],
+						input: json.RawMessage(m[1]),
+					})
+				}
+			}
+		}
+	}
+	return tools
 }
 
 type toolUseInfo struct {

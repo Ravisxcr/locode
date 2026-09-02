@@ -592,6 +592,10 @@ func main() {
 			outputStyle, _ := cmd.Flags().GetString("output-style")
 			provFlag, _ := cmd.Flags().GetString("provider")
 			ragEnabled, _ := cmd.Flags().GetBool("rag")
+			ollamaHostFlag, _ := cmd.Flags().GetString("ollama-host")
+			if ollamaHostFlag != "" {
+				os.Setenv("OLLAMA_HOST", ollamaHostFlag)
+			}
 
 			if provFlag == "ollama" && !strings.HasPrefix(model, "ollama/") {
 				model = "ollama/" + model
@@ -887,6 +891,7 @@ func main() {
 	chatCmd.Flags().String("output-style", "markdown", "Output style: concise, verbose, markdown, minimal")
 	chatCmd.Flags().String("provider", "", "LLM provider: ollama, anthropic, openai, gemini, xai, groq, deepseek, mistral")
 	chatCmd.Flags().Bool("rag", false, "Enable automatic RAG context augmentation from indexed codebase")
+	chatCmd.Flags().String("ollama-host", "", "Custom Ollama host endpoint (e.g. 192.168.1.6:11434 or http://192.168.1.6:11434)")
 	rootCmd.AddCommand(chatCmd)
 
 	// --- profile commands ---
@@ -1127,6 +1132,10 @@ func main() {
 			outputSchema, _ := cmd.Flags().GetString("output-schema")
 			provFlag, _ := cmd.Flags().GetString("provider")
 			ragEnabled, _ := cmd.Flags().GetBool("rag")
+			ollamaHostFlag, _ := cmd.Flags().GetString("ollama-host")
+			if ollamaHostFlag != "" {
+				os.Setenv("OLLAMA_HOST", ollamaHostFlag)
+			}
 
 			if provFlag == "ollama" && !strings.HasPrefix(model, "ollama/") {
 				model = "ollama/" + model
@@ -1273,6 +1282,7 @@ func main() {
 	promptCmd.Flags().String("output-schema", "", "Path to JSON Schema for validating structured output")
 	promptCmd.Flags().String("provider", "", "LLM provider: ollama, anthropic, openai, gemini, xai, groq, deepseek, mistral")
 	promptCmd.Flags().Bool("rag", false, "Enable automatic RAG context augmentation from indexed codebase")
+	promptCmd.Flags().String("ollama-host", "", "Custom Ollama host endpoint (e.g. 192.168.1.6:11434 or http://192.168.1.6:11434)")
 	rootCmd.AddCommand(promptCmd)
 
 	// 21. mcp-serve
@@ -1825,13 +1835,20 @@ func main() {
 	// --- ollama — Ollama integration commands ---
 	ollamaCmd := &cobra.Command{
 		Use:   "ollama",
-		Short: "Interact with local Ollama server",
+		Short: "Interact with local or remote Ollama server",
 	}
-	ollamaCmd.AddCommand(&cobra.Command{
+
+	ollamaListCmd := &cobra.Command{
 		Use:   "list",
-		Short: "List models installed on local Ollama",
+		Short: "List models installed on Ollama",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			host := apiclient.DefaultOllamaHost()
+			host, _ := cmd.Flags().GetString("host")
+			if host == "" {
+				host = apiclient.DefaultOllamaHost()
+			} else {
+				host = apiclient.NormalizeOllamaHost(host)
+			}
+
 			prov := apiclient.NewOllamaProvider(host, apitypes.AuthSource{})
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -1853,12 +1870,21 @@ func main() {
 			}
 			return nil
 		},
-	})
-	ollamaCmd.AddCommand(&cobra.Command{
+	}
+	ollamaListCmd.Flags().String("host", "", "Ollama host IP or URL (e.g. 192.168.1.6 or http://192.168.1.6:11434)")
+	ollamaCmd.AddCommand(ollamaListCmd)
+
+	ollamaStatusCmd := &cobra.Command{
 		Use:   "status",
 		Short: "Check Ollama server health and connection",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			host := apiclient.DefaultOllamaHost()
+			host, _ := cmd.Flags().GetString("host")
+			if host == "" {
+				host = apiclient.DefaultOllamaHost()
+			} else {
+				host = apiclient.NormalizeOllamaHost(host)
+			}
+
 			prov := apiclient.NewOllamaProvider(host, apitypes.AuthSource{})
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
@@ -1876,7 +1902,9 @@ func main() {
 			fmt.Printf("  Installed models: %d\n", len(models))
 			return nil
 		},
-	})
+	}
+	ollamaStatusCmd.Flags().String("host", "", "Ollama host IP or URL (e.g. 192.168.1.6 or http://192.168.1.6:11434)")
+	ollamaCmd.AddCommand(ollamaStatusCmd)
 	rootCmd.AddCommand(ollamaCmd)
 
 	if err := rootCmd.Execute(); err != nil {

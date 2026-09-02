@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
+	"github.com/ollama/ollama/api"
 )
 
 func TestCleanModelName(t *testing.T) {
@@ -39,9 +41,22 @@ func TestDefaultOllamaHost(t *testing.T) {
 		t.Errorf("DefaultOllamaHost() = %q, want http://localhost:11434", got)
 	}
 
-	os.Setenv("OLLAMA_HOST", "192.168.1.100:11434")
-	if got := DefaultOllamaHost(); got != "http://192.168.1.100:11434" {
-		t.Errorf("DefaultOllamaHost() with OLLAMA_HOST = %q, want http://192.168.1.100:11434", got)
+	// Test bare LAN IP without port (e.g. Nginx reverse proxy on port 80)
+	os.Setenv("OLLAMA_HOST", "192.168.1.6")
+	if got := DefaultOllamaHost(); got != "http://192.168.1.6" {
+		t.Errorf("DefaultOllamaHost() with bare IP = %q, want http://192.168.1.6", got)
+	}
+
+	// Test LAN IP with explicit port
+	os.Setenv("OLLAMA_HOST", "192.168.1.6:11434")
+	if got := DefaultOllamaHost(); got != "http://192.168.1.6:11434" {
+		t.Errorf("DefaultOllamaHost() with IP:port = %q, want http://192.168.1.6:11434", got)
+	}
+
+	// Test with http prefix (no port)
+	os.Setenv("OLLAMA_HOST", "http://192.168.1.6")
+	if got := DefaultOllamaHost(); got != "http://192.168.1.6" {
+		t.Errorf("DefaultOllamaHost() with http://IP = %q, want http://192.168.1.6", got)
 	}
 
 	os.Unsetenv("OLLAMA_HOST")
@@ -55,8 +70,8 @@ func TestDefaultOllamaHost(t *testing.T) {
 func TestOllamaProvider_ListLocalModels(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/tags" {
-			resp := OllamaTagsResponse{
-				Models: []OllamaModelInfo{
+			resp := api.ListResponse{
+				Models: []api.ListModelResponse{
 					{Name: "llama3.3:latest", Model: "llama3.3:latest", Size: 4300000000},
 					{Name: "nomic-embed-text:latest", Model: "nomic-embed-text:latest", Size: 274000000},
 				},
@@ -86,10 +101,10 @@ func TestOllamaProvider_ListLocalModels(t *testing.T) {
 func TestOllamaProvider_Embeddings(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/embeddings" {
-			var req OllamaEmbeddingRequest
+			var req api.EmbeddingRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
-			resp := OllamaEmbeddingResponse{
-				Embedding: []float32{0.1, 0.2, 0.3, 0.4},
+			resp := api.EmbeddingResponse{
+				Embedding: []float64{0.1, 0.2, 0.3, 0.4},
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
@@ -141,3 +156,98 @@ func TestOllamaProvider_SanitizeResponseToolCalls(t *testing.T) {
 		t.Errorf("expected tool_use block to be extracted, got: %+v", resp.Content)
 	}
 }
+
+func TestOllamaProvider_NativeChat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/chat" {
+			var req api.ChatRequest
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			if req.Model != "llama3.3:latest" {
+				t.Errorf("expected model llama3.3:latest, got %s", req.Model)
+			}
+			resp := api.ChatResponse{
+				Model: req.Model,
+				Message: api.Message{
+					Role:    "assistant",
+					Content: "Hello from Ollama native API!",
+				},
+				Done: true,
+				Metrics: api.Metrics{
+					PromptEvalCount: 15,
+					EvalCount:       20,
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	prov := NewOllamaProvider(server.URL, apitypes.AuthSource{})
+	resp, err := prov.SendMessage(context.Background(), apitypes.MessageRequest{
+		Model: "llama3.3",
+		Messages: []apitypes.InputMessage{
+			apitypes.UserText("hello"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage failed: %v", err)
+	}
+	if len(resp.Content) == 0 || resp.Content[0].Text != "Hello from Ollama native API!" {
+		t.Errorf("unexpected response content: %+v", resp.Content)
+	}
+	if resp.Usage.InputTokens != 15 || resp.Usage.OutputTokens != 20 {
+		t.Errorf("unexpected usage: %+v", resp.Usage)
+	}
+}
+
+func TestOllamaProvider_NativeStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/chat" {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			flusher, _ := w.(http.Flusher)
+
+			chunks := []api.ChatResponse{
+				{Model: "llama3.3:latest", Message: api.Message{Role: "assistant", Content: "Hello "}, Done: false},
+				{Model: "llama3.3:latest", Message: api.Message{Role: "assistant", Content: "world!"}, Done: true, Metrics: api.Metrics{PromptEvalCount: 10, EvalCount: 15}},
+			}
+			for _, chunk := range chunks {
+				data, _ := json.Marshal(chunk)
+				w.Write(data)
+				w.Write([]byte("\n"))
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	prov := NewOllamaProvider(server.URL, apitypes.AuthSource{})
+	eventCh, err := prov.StreamMessage(context.Background(), apitypes.MessageRequest{
+		Model: "llama3.3",
+		Messages: []apitypes.InputMessage{
+			apitypes.UserText("hi"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("StreamMessage failed: %v", err)
+	}
+
+	var textParts []string
+	for ev := range eventCh {
+		if ev.Kind == "content_block_delta" && ev.BlockDelta != nil {
+			textParts = append(textParts, ev.BlockDelta.Text)
+		}
+	}
+
+	fullText := strings.Join(textParts, "")
+	if fullText != "Hello world!" {
+		t.Errorf("streamed text = %q, want 'Hello world!'", fullText)
+	}
+}
+
