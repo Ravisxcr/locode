@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ravisxcr/gocode-rag/internal/apiclient"
 	"github.com/Ravisxcr/gocode-rag/internal/gitcommit"
 	"github.com/Ravisxcr/gocode-rag/internal/pdf"
 )
@@ -1112,7 +1113,16 @@ func (t *PromptTool) Execute(params map[string]interface{}) ToolResult {
 // --- GitCommitTool ---
 
 // GitCommitTool commits staged or unstaged changes with a conventional commit message.
-type GitCommitTool struct{}
+type GitCommitTool struct {
+	provider apiclient.Provider
+	model    string
+}
+
+// SetProvider configures the LLM provider used to synthesize commit messages.
+func (t *GitCommitTool) SetProvider(prov apiclient.Provider, model string) {
+	t.provider = prov
+	t.model = model
+}
 
 func (t *GitCommitTool) Execute(params map[string]interface{}) ToolResult {
 	if !gitcommit.IsInsideWorkTree() {
@@ -1134,8 +1144,30 @@ func (t *GitCommitTool) Execute(params map[string]interface{}) ToolResult {
 
 	msg, _ := params["message"].(string)
 	msg = strings.TrimSpace(msg)
-	if msg == "" {
-		msg = gitcommit.HeuristicMessage(stat, diff)
+
+	// Validate against agent hallucinations:
+	// If the model guessed a message (e.g. "update README") but those files were never modified in stat,
+	// override the hallucination by generating a truthful message directly from the git diff.
+	isHallucination := false
+	lowerMsg := strings.ToLower(msg)
+	lowerStat := strings.ToLower(stat)
+	if strings.Contains(lowerMsg, "readme") && !strings.Contains(lowerStat, "readme") {
+		isHallucination = true
+	}
+	if strings.Contains(lowerMsg, "doc") && !strings.Contains(lowerStat, "doc") && !strings.Contains(lowerStat, ".md") {
+		isHallucination = true
+	}
+
+	if msg == "" || isHallucination {
+		if t.provider != nil {
+			generated, genErr := gitcommit.GenerateMessage(context.Background(), t.provider, t.model, diff, stat)
+			if genErr == nil && generated != "" {
+				msg = generated
+			}
+		}
+		if msg == "" || isHallucination {
+			msg = gitcommit.HeuristicMessage(stat, diff)
+		}
 	}
 
 	sha, out, err := gitcommit.ExecuteCommit(msg)

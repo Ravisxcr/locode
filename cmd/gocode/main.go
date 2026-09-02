@@ -699,6 +699,9 @@ func main() {
 			router := buildModelRouter(fp)
 
 			toolImpl := toolimpl.NewRegistry()
+			if gc, ok := toolImpl.Get("git_commit").(*toolimpl.GitCommitTool); ok {
+				gc.SetProvider(provider, resolvedModel)
+			}
 
 			// Phase 1 + Phase 3: register advanced tools (hashline, context-aware read, ast-grep, tmux, MCP client)
 			cleanup := wireAdvancedTools(toolImpl, hashlineEnabled)

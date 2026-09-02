@@ -1307,6 +1307,7 @@ You have tools at your disposal to solve the coding task. Follow these rules reg
 - When the user asks you to "search" or "look up" something, use WebSearchTool with a clear query in English. If the user doesn't specify a query, infer it from the conversation context. NEVER call WebSearchTool with an empty query.
 - WebSearchTool searches Wikipedia, GitHub, Reddit, Hacker News, and StackOverflow in parallel. Use it for current events, technical questions, people, projects, or any factual lookup.
 - When the user asks a follow-up like "search for that" or "look it up", construct the query from what was just discussed. Always provide the query parameter in English.
+- When committing with git_commit: NEVER invent or guess a commit message yourself. Leave 'message' empty so the system automatically inspects the real git diff and generates an accurate conventional commit message. Only provide 'message' if the user explicitly dictated an exact commit message in their prompt.
 
 # Making Code Changes & Writing High-Quality Code
 

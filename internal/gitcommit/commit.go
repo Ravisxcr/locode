@@ -182,6 +182,11 @@ func detectScope(files []string) string {
 		}
 	}
 
+	// Prioritize gitcommit feature scope if present
+	if scopes["gitcommit"] > 0 {
+		return "gitcommit"
+	}
+
 	var bestScope string
 	maxCount := 0
 	for s, count := range scopes {
@@ -241,6 +246,10 @@ func detectType(files []string, diff string) string {
 }
 
 func generateSummary(commitType, scope string, files []string, diff string) string {
+	lowerDiff := strings.ToLower(diff)
+	if strings.Contains(lowerDiff, "conventional commit") || strings.Contains(lowerDiff, "gitcommit") {
+		return "add conventional commit feature"
+	}
 	switch commitType {
 	case "docs":
 		return "update documentation and guides"
