@@ -1,10 +1,13 @@
-VERSION ?= 0.1.0
-LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
+BINARY_NAME := gocode
+VERSION     ?= v0.9.0
+LDFLAGS     := -ldflags "-s -w -X main.version=$(VERSION)"
 
-.PHONY: build test clean install release-snapshot
+.PHONY: all build test clean install index doctor
+
+all: build
 
 build:
-	go build $(LDFLAGS) -o bin/gocode ./cmd/gocode
+	go build $(LDFLAGS) -o bin/$(BINARY_NAME) ./cmd/gocode
 
 test:
 	go test ./...
@@ -15,5 +18,8 @@ clean:
 install:
 	go install $(LDFLAGS) ./cmd/gocode
 
-release-snapshot:
-	goreleaser release --snapshot --clean
+index: build
+	./bin/$(BINARY_NAME) index
+
+doctor: build
+	./bin/$(BINARY_NAME) doctor
