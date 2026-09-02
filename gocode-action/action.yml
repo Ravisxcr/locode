@@ -20,7 +20,7 @@ runs:
     - name: Install gocode
       shell: bash
       run: |
-        curl -fsSL https://raw.githubusercontent.com/AlleyBo55/gocode/main/install.sh | bash
+        curl -fsSL https://raw.githubusercontent.com/Ravisxcr/gocode-rag/main/install.sh | bash
         echo "$HOME/.gocode/bin" >> "$GITHUB_PATH"
 
     - name: Configure provider key

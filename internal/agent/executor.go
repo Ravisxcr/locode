@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
-	"github.com/AlleyBo55/gocode/internal/models"
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
-	"github.com/AlleyBo55/gocode/internal/tools"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/models"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/tools"
 )
 
 // ToolExecutor dispatches tool-use requests to implementations.

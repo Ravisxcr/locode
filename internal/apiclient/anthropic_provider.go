@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 // Provider is the core abstraction for LLM API communication.

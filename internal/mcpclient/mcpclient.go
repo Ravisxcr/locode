@@ -12,7 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 // --- JSON-RPC types (local to avoid circular imports with internal/mcp) ---

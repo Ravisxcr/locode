@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/agent"
-	"github.com/AlleyBo55/gocode/internal/apiclient"
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/agent"
+	"github.com/Ravisxcr/gocode-rag/internal/apiclient"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 const plannerSystemPrompt = `You are a planning agent. Your job is to help the user create a structured plan before any code execution begins.

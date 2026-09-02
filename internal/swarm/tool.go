@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/AlleyBo55/gocode/internal/models"
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/models"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
 )
 
 // SendMessageTool implements toolimpl.ToolExecutor for inter-agent messaging.

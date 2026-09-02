@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
-	"github.com/AlleyBo55/gocode/internal/session"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/session"
 )
 
 // RecoveryLogger receives recovery events for observability.

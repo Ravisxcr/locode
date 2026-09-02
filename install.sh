@@ -4,7 +4,7 @@ set -euo pipefail
 # gocode installer — works on macOS and Linux
 # Usage: curl -fsSL https://raw.githubusercontent.com/gocode/gocode/main/install.sh | bash
 
-REPO="AlleyBo55/gocode"
+REPO="Ravisxcr/gocode-rag"
 BINARY="gocode"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 

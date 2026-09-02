@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlleyBo55/gocode/internal/agent"
+	"github.com/Ravisxcr/gocode-rag/internal/agent"
 )
 
 // HookConfig is the top-level hooks configuration from .gocode/hooks.json.

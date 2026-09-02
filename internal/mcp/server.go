@@ -9,13 +9,13 @@ import (
 	"os"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/commands"
-	"github.com/AlleyBo55/gocode/internal/manifest"
-	"github.com/AlleyBo55/gocode/internal/models"
-	"github.com/AlleyBo55/gocode/internal/runtime"
-	"github.com/AlleyBo55/gocode/internal/session"
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
-	"github.com/AlleyBo55/gocode/internal/tools"
+	"github.com/Ravisxcr/gocode-rag/internal/commands"
+	"github.com/Ravisxcr/gocode-rag/internal/manifest"
+	"github.com/Ravisxcr/gocode-rag/internal/models"
+	"github.com/Ravisxcr/gocode-rag/internal/runtime"
+	"github.com/Ravisxcr/gocode-rag/internal/session"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/tools"
 )
 
 // --- JSON-RPC types ---

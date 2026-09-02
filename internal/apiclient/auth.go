@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 // ResolveAuthSource resolves credentials from CLI flags, env vars, and provider type.

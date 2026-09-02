@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/models"
+	"github.com/Ravisxcr/gocode-rag/internal/models"
 )
 
 // CommandGraph segments commands into builtin, plugin-like, and skill-like categories.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
 )
 
 // ---------------------------------------------------------------------------

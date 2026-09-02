@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/commands"
-	"github.com/AlleyBo55/gocode/internal/setup"
-	"github.com/AlleyBo55/gocode/internal/tools"
+	"github.com/Ravisxcr/gocode-rag/internal/commands"
+	"github.com/Ravisxcr/gocode-rag/internal/setup"
+	"github.com/Ravisxcr/gocode-rag/internal/tools"
 )
 
 // BuildSystemInitMessage assembles the system initialization message for a new session.

@@ -1,6 +1,6 @@
 package plugins
 
-import "github.com/AlleyBo55/gocode/internal/agent"
+import "github.com/Ravisxcr/gocode-rag/internal/agent"
 
 // PluginHookRunner wraps plugin hooks into the agent.HookRunner interface.
 type PluginHookRunner struct {

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
 )
 
 // EnterWorktreeTool implements toolimpl.ToolExecutor.

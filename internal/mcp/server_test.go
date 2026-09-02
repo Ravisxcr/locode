@@ -6,13 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AlleyBo55/gocode/data"
-	"github.com/AlleyBo55/gocode/internal/commands"
-	"github.com/AlleyBo55/gocode/internal/execution"
-	"github.com/AlleyBo55/gocode/internal/runtime"
-	"github.com/AlleyBo55/gocode/internal/session"
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
-	"github.com/AlleyBo55/gocode/internal/tools"
+	"github.com/Ravisxcr/gocode-rag/data"
+	"github.com/Ravisxcr/gocode-rag/internal/commands"
+	"github.com/Ravisxcr/gocode-rag/internal/execution"
+	"github.com/Ravisxcr/gocode-rag/internal/runtime"
+	"github.com/Ravisxcr/gocode-rag/internal/session"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/tools"
 )
 
 func newTestServer(t *testing.T) *MCPServer {

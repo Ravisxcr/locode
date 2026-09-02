@@ -23,7 +23,7 @@
 <h3 align="center">One binary. Zero dependencies. 200+ models. A team of agents.<br/>Inspired by the best terminal AI agents. Built from scratch in Go. Faster than everything else.</h3>
 
 <p align="center">
-  <code>go install github.com/AlleyBo55/gocode/cmd/gocode@latest</code>
+  <code>go install github.com/Ravisxcr/gocode-rag/cmd/gocode@latest</code>
 </p>
 
 ---
@@ -273,24 +273,24 @@ Create your own — drop a JSON file in `.gocode/skills/`.
 ### One-Line Install (macOS / Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AlleyBo55/gocode/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Ravisxcr/gocode-rag/main/install.sh | bash
 ```
 
 ### One-Line Install (Windows PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/AlleyBo55/gocode/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Ravisxcr/gocode-rag/main/install.ps1 | iex
 ```
 
 ### Go Install (all platforms, requires Go 1.21+)
 
 ```bash
-go install github.com/AlleyBo55/gocode/cmd/gocode@latest
+go install github.com/Ravisxcr/gocode-rag/cmd/gocode@latest
 ```
 
 ### Download Binary Manually
 
-Grab the binary for your platform from [GitHub Releases](https://github.com/AlleyBo55/gocode/releases):
+Grab the binary for your platform from [GitHub Releases](https://github.com/Ravisxcr/gocode-rag/releases):
 
 | Platform | File |
 |----------|------|
@@ -305,18 +305,18 @@ Grab the binary for your platform from [GitHub Releases](https://github.com/Alle
 
 ```bash
 # Debian/Ubuntu
-curl -fsSL https://github.com/AlleyBo55/gocode/releases/latest/download/gocode_amd64.deb -o gocode.deb
+curl -fsSL https://github.com/Ravisxcr/gocode-rag/releases/latest/download/gocode_amd64.deb -o gocode.deb
 sudo dpkg -i gocode.deb
 
 # Fedora/RHEL
-curl -fsSL https://github.com/AlleyBo55/gocode/releases/latest/download/gocode_amd64.rpm -o gocode.rpm
+curl -fsSL https://github.com/Ravisxcr/gocode-rag/releases/latest/download/gocode_amd64.rpm -o gocode.rpm
 sudo rpm -i gocode.rpm
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/AlleyBo55/gocode.git
+git clone https://github.com/Ravisxcr/gocode-rag.git
 cd gocode
 go build -o gocode ./cmd/gocode/
 sudo mv gocode /usr/local/bin/
@@ -334,7 +334,7 @@ gocode --version
 
 ```bash
 # 1. Install
-go install github.com/AlleyBo55/gocode/cmd/gocode@latest
+go install github.com/Ravisxcr/gocode-rag/cmd/gocode@latest
 
 # 2. Set your API key (pick any provider)
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -449,7 +449,7 @@ gocode is inspired by Claude Code but built from scratch with a different archit
 ## Contributing
 
 ```bash
-git clone https://github.com/AlleyBo55/gocode.git
+git clone https://github.com/Ravisxcr/gocode-rag.git
 cd gocode
 make test && make build
 ```

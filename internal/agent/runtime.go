@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/AlleyBo55/gocode/internal/apiclient"
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/apiclient"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 // RuntimeOptions configures a ConversationRuntime.

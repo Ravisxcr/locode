@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 // Display handles rendering of streaming events and tool status to the terminal.

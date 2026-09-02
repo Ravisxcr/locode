@@ -3,7 +3,7 @@ package agent
 import (
 	"fmt"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 // UsageTracker accumulates token usage across turns.

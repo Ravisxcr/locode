@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
 )
 
 // ContentHash computes a deterministic 2-character base36 hash of trimmed line content.

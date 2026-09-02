@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
 )
 
 // ContextAwareReadTool wraps an existing FileReadTool (or any read tool) and

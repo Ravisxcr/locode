@@ -1,9 +1,9 @@
 # gocode installer for Windows
-# Usage: irm https://raw.githubusercontent.com/AlleyBo55/gocode/main/install.ps1 | iex
+# Usage: irm https://raw.githubusercontent.com/Ravisxcr/gocode-rag/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
-$repo = "AlleyBo55/gocode"
+$repo = "Ravisxcr/gocode-rag"
 $binary = "gocode"
 
 # Detect architecture

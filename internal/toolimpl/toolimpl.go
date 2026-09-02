@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlleyBo55/gocode/internal/pdf"
+	"github.com/Ravisxcr/gocode-rag/internal/pdf"
 )
 
 // ToolResult is the outcome of executing a tool.
@@ -606,7 +606,7 @@ func searchWikipedia(ctx context.Context, query string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "gocode/1.0 (https://github.com/AlleyBo55/gocode)")
+	req.Header.Set("User-Agent", "gocode/1.0 (https://github.com/Ravisxcr/gocode-rag)")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -662,7 +662,7 @@ func searchWikipedia(ctx context.Context, query string) (string, error) {
 		// Get page summary
 		sumURL := fmt.Sprintf("https://en.wikipedia.org/api/rest_v1/page/summary/%s", title)
 		sumReq, _ := http.NewRequestWithContext(ctx, "GET", sumURL, nil)
-		sumReq.Header.Set("User-Agent", "gocode/1.0 (https://github.com/AlleyBo55/gocode)")
+		sumReq.Header.Set("User-Agent", "gocode/1.0 (https://github.com/Ravisxcr/gocode-rag)")
 		if sumResp, err := http.DefaultClient.Do(sumReq); err == nil {
 			sumBody := make([]byte, 32768)
 			sn, _ := sumResp.Body.Read(sumBody)
@@ -705,7 +705,7 @@ func fetchWikiInfobox(ctx context.Context, title string) string {
 	if err != nil {
 		return ""
 	}
-	req.Header.Set("User-Agent", "gocode/1.0 (https://github.com/AlleyBo55/gocode)")
+	req.Header.Set("User-Agent", "gocode/1.0 (https://github.com/Ravisxcr/gocode-rag)")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return ""
@@ -826,7 +826,7 @@ func searchReddit(ctx context.Context, query string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "gocode/1.0 (https://github.com/AlleyBo55/gocode)")
+	req.Header.Set("User-Agent", "gocode/1.0 (https://github.com/Ravisxcr/gocode-rag)")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

@@ -21,8 +21,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AlleyBo55/gocode/internal/agent"
-	"github.com/AlleyBo55/gocode/internal/apiclient"
+	"github.com/Ravisxcr/gocode-rag/internal/agent"
+	"github.com/Ravisxcr/gocode-rag/internal/apiclient"
 )
 
 // DefaultTimeout is the max duration for a dream cycle.

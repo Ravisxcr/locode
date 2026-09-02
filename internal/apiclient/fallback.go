@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
 )
 
 // FallbackLogger receives fallback events for observability.

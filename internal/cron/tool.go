@@ -8,8 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"github.com/AlleyBo55/gocode/internal/models"
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/models"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
 )
 
 // cronEntry is the JSON-serializable form of a scheduled cron task.

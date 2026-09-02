@@ -1,4 +1,4 @@
-module github.com/AlleyBo55/gocode
+module github.com/Ravisxcr/gocode-rag
 
 go 1.24.2
 

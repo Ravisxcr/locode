@@ -1,7 +1,7 @@
 package checkpoint
 
 import (
-	"github.com/AlleyBo55/gocode/internal/toolimpl"
+	"github.com/Ravisxcr/gocode-rag/internal/toolimpl"
 )
 
 // CheckpointToolWrapper wraps a ToolExecutor and creates checkpoints on success.

@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/AlleyBo55/gocode/internal/agent"
+	"github.com/Ravisxcr/gocode-rag/internal/agent"
 )
 
 // --- Config loading tests ---

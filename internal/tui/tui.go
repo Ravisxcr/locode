@@ -9,9 +9,9 @@ import (
 
 	bubbletea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/AlleyBo55/gocode/internal/agent"
-	"github.com/AlleyBo55/gocode/internal/apitypes"
-	"github.com/AlleyBo55/gocode/internal/skills"
+	"github.com/Ravisxcr/gocode-rag/internal/agent"
+	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
+	"github.com/Ravisxcr/gocode-rag/internal/skills"
 )
 
 // Mode represents the current agent mode.

@@ -5,14 +5,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/AlleyBo55/gocode/internal/commands"
-	"github.com/AlleyBo55/gocode/internal/execution"
-	"github.com/AlleyBo55/gocode/internal/history"
-	"github.com/AlleyBo55/gocode/internal/queryengine"
-	"github.com/AlleyBo55/gocode/internal/session"
-	"github.com/AlleyBo55/gocode/internal/setup"
-	"github.com/AlleyBo55/gocode/internal/systeminit"
-	"github.com/AlleyBo55/gocode/internal/tools"
+	"github.com/Ravisxcr/gocode-rag/internal/commands"
+	"github.com/Ravisxcr/gocode-rag/internal/execution"
+	"github.com/Ravisxcr/gocode-rag/internal/history"
+	"github.com/Ravisxcr/gocode-rag/internal/queryengine"
+	"github.com/Ravisxcr/gocode-rag/internal/session"
+	"github.com/Ravisxcr/gocode-rag/internal/setup"
+	"github.com/Ravisxcr/gocode-rag/internal/systeminit"
+	"github.com/Ravisxcr/gocode-rag/internal/tools"
 )
 
 // RoutedMatch represents a prompt routing match against a command or tool.

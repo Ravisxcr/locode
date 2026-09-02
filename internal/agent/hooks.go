@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/AlleyBo55/gocode/internal/apitypes"
+import "github.com/Ravisxcr/gocode-rag/internal/apitypes"
 
 // HookRunner executes pre/post tool-use hooks.
 type HookRunner interface {

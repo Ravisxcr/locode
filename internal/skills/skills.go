@@ -14,7 +14,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/AlleyBo55/gocode/internal/agent"
+	"github.com/Ravisxcr/gocode-rag/internal/agent"
 )
 
 // Skill is a domain-tuned agent profile loaded from JSON.
