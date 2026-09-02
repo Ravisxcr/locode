@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -45,6 +46,7 @@ import (
 	"github.com/Ravisxcr/gocode-rag/internal/plugins"
 	"github.com/Ravisxcr/gocode-rag/internal/profiles"
 	"github.com/Ravisxcr/gocode-rag/internal/queryengine"
+	"github.com/Ravisxcr/gocode-rag/internal/rag"
 	"github.com/Ravisxcr/gocode-rag/internal/repl"
 	"github.com/Ravisxcr/gocode-rag/internal/runtime"
 	"github.com/Ravisxcr/gocode-rag/internal/session"
@@ -96,6 +98,9 @@ func wireAdvancedTools(toolImpl *toolimpl.Registry, hashlineEnabled bool) func()
 	// Phase 3: tmux tools
 	tmuxMgr := tmux.NewManager()
 	tmux.RegisterTmuxTools(toolImpl, tmuxMgr)
+
+	// Phase 3: RAG codebase semantic search tool
+	rag.RegisterRagTools(toolImpl, nil)
 
 	// Phase 3: MCP client tools (only if user has a .gocode/mcp.json config)
 	mcpConfigPath := filepath.Join(".gocode", "mcp.json")
@@ -585,6 +590,12 @@ func main() {
 			continueSession, _ := cmd.Flags().GetBool("c")
 			resumeSession, _ := cmd.Flags().GetString("r")
 			outputStyle, _ := cmd.Flags().GetString("output-style")
+			provFlag, _ := cmd.Flags().GetString("provider")
+			ragEnabled, _ := cmd.Flags().GetBool("rag")
+
+			if provFlag == "ollama" && !strings.HasPrefix(model, "ollama/") {
+				model = "ollama/" + model
+			}
 
 			// Handle -c: load most recent session for current working directory
 			var loadedSession *session.StoredSession
@@ -739,6 +750,21 @@ func main() {
 				systemPrompt += fmt.Sprintf("\n\n# Disallowed Tools\nDo NOT use these tools: %s\n", strings.Join(disallowedTools, ", "))
 			}
 
+			// RAG context auto-injection
+			if ragEnabled {
+				indexPath := filepath.Join(".gocode", "rag", "index.json")
+				if _, err := os.Stat(indexPath); err == nil {
+					embedder := rag.ResolveEmbedder(rag.EmbedderConfig{Provider: "auto"})
+					vstore := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+					if err := vstore.Load(indexPath); err == nil {
+						retriever := rag.NewRetriever(vstore, embedder)
+						if results, err := retriever.Retrieve(context.Background(), resolvedModel+" codebase overview", 4, ""); err == nil && len(results) > 0 {
+							systemPrompt += "\n\n# Codebase Context (from Vector RAG)\n\n" + rag.FormatContext(results)
+						}
+					}
+				}
+			}
+
 			if printPrompt {
 				fmt.Println(systemPrompt)
 				return nil
@@ -859,6 +885,8 @@ func main() {
 	chatCmd.Flags().StringP("r", "r", "", "Resume a session by ID, or pass 'list' to select interactively")
 	chatCmd.Flags().Lookup("r").NoOptDefVal = "list"
 	chatCmd.Flags().String("output-style", "markdown", "Output style: concise, verbose, markdown, minimal")
+	chatCmd.Flags().String("provider", "", "LLM provider: ollama, anthropic, openai, gemini, xai, groq, deepseek, mistral")
+	chatCmd.Flags().Bool("rag", false, "Enable automatic RAG context augmentation from indexed codebase")
 	rootCmd.AddCommand(chatCmd)
 
 	// --- profile commands ---
@@ -967,6 +995,37 @@ func main() {
 			if _, err := os.Stat(profiles.DefaultProfilePath()); err == nil {
 				fmt.Printf("  ✓ Profile: %s found\n", profiles.DefaultProfilePath())
 			}
+
+			// Check Ollama daemon
+			ollamaHost := apiclient.DefaultOllamaHost()
+			prov := apiclient.NewOllamaProvider(ollamaHost, apitypes.AuthSource{})
+			ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+			defer cancel()
+			if models, err := prov.ListLocalModels(ctx); err == nil {
+				var names []string
+				for _, m := range models {
+					names = append(names, m.Name)
+				}
+				if len(names) > 4 {
+					names = append(names[:4], fmt.Sprintf("+%d more", len(names)-4))
+				}
+				fmt.Printf("  ✓ Ollama: %s connected (%d models: %s)\n", ollamaHost, len(models), strings.Join(names, ", "))
+			} else {
+				fmt.Printf("  - Ollama: %s not responding (%v)\n", ollamaHost, err)
+			}
+
+			// Check RAG index
+			ragIndexPath := filepath.Join(".gocode", "rag", "index.json")
+			if _, err := os.Stat(ragIndexPath); err == nil {
+				embedder := rag.ResolveEmbedder(rag.EmbedderConfig{Provider: "auto"})
+				vstore := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+				if err := vstore.Load(ragIndexPath); err == nil {
+					stats := vstore.Stats()
+					fmt.Printf("  ✓ RAG Index: %d chunks across %d files (model: %s)\n", stats.TotalChunks, stats.TotalFiles, stats.ModelName)
+				}
+			} else {
+				fmt.Printf("  - RAG Index: not created yet (run 'gocode index' or /index)\n")
+			}
 		},
 	}
 	rootCmd.AddCommand(doctorCmd)
@@ -1066,6 +1125,12 @@ func main() {
 			verbose, _ := cmd.Flags().GetBool("verbose")
 			outputFormat, _ := cmd.Flags().GetString("output-format")
 			outputSchema, _ := cmd.Flags().GetString("output-schema")
+			provFlag, _ := cmd.Flags().GetString("provider")
+			ragEnabled, _ := cmd.Flags().GetBool("rag")
+
+			if provFlag == "ollama" && !strings.HasPrefix(model, "ollama/") {
+				model = "ollama/" + model
+			}
 
 			provider, resolvedModel, err := apiclient.ResolveProvider(model, apiKey)
 			if err != nil {
@@ -1111,6 +1176,21 @@ func main() {
 					return fmt.Errorf("unknown skill: %s", skillName)
 				}
 				systemPrompt = sk.SystemPrompt + "\n\n" + systemPrompt
+			}
+
+			// RAG context auto-injection
+			if ragEnabled {
+				indexPath := filepath.Join(".gocode", "rag", "index.json")
+				if _, err := os.Stat(indexPath); err == nil {
+					embedder := rag.ResolveEmbedder(rag.EmbedderConfig{Provider: "auto"})
+					vstore := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+					if err := vstore.Load(indexPath); err == nil {
+						retriever := rag.NewRetriever(vstore, embedder)
+						if results, err := retriever.Retrieve(context.Background(), args[0], 4, ""); err == nil && len(results) > 0 {
+							systemPrompt += "\n\n# Codebase Context (from Vector RAG)\n\n" + rag.FormatContext(results)
+						}
+					}
+				}
 			}
 
 			if printPrompt {
@@ -1191,6 +1271,8 @@ func main() {
 	promptCmd.Flags().Bool("verbose", false, "Log API request/response sizes")
 	promptCmd.Flags().String("output-format", "", "Output format: 'json' for structured JSON output")
 	promptCmd.Flags().String("output-schema", "", "Path to JSON Schema for validating structured output")
+	promptCmd.Flags().String("provider", "", "LLM provider: ollama, anthropic, openai, gemini, xai, groq, deepseek, mistral")
+	promptCmd.Flags().Bool("rag", false, "Enable automatic RAG context augmentation from indexed codebase")
 	rootCmd.AddCommand(promptCmd)
 
 	// 21. mcp-serve
@@ -1548,6 +1630,254 @@ func main() {
 		},
 	})
 	rootCmd.AddCommand(authCmd)
+
+	// --- index — index workspace for RAG ---
+	indexCmd := &cobra.Command{
+		Use:   "index [path]",
+		Short: "Index workspace codebase for vector RAG search",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := "."
+			if len(args) > 0 {
+				root = args[0]
+			}
+			prov, _ := cmd.Flags().GetString("embedder")
+			model, _ := cmd.Flags().GetString("model")
+			force, _ := cmd.Flags().GetBool("force")
+
+			embedder := rag.ResolveEmbedder(rag.EmbedderConfig{
+				Provider: prov,
+				Model:    model,
+			})
+			chunker := rag.NewCodeChunker(rag.DefaultChunkOptions())
+			store := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+			indexer := rag.NewIndexer(chunker, embedder, store)
+
+			opts := rag.DefaultIndexOptions(root)
+			opts.ForceReindex = force
+			opts.ProgressCb = func(file string, cur, tot int) {
+				fmt.Printf("\r[%d/%d] Indexing %s...", cur, tot, file)
+			}
+
+			fmt.Printf("Indexing %s using %s...\n", root, embedder.ModelName())
+			report, err := indexer.IndexWorkspace(context.Background(), opts)
+			fmt.Println()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("✓ Indexing completed in %s\n", report.Duration.Round(time.Millisecond))
+			fmt.Printf("  Files:  %d indexed, %d skipped (total %d scanned)\n", report.FilesIndexed, report.FilesSkipped, report.TotalFilesScanned)
+			fmt.Printf("  Chunks: %d\n", report.TotalChunks)
+			fmt.Printf("  Index:  %s\n", report.IndexPath)
+			return nil
+		},
+	}
+	indexCmd.Flags().String("embedder", "auto", "Embedder provider: auto, ollama, openai, local")
+	indexCmd.Flags().String("model", "", "Embedding model (e.g. nomic-embed-text)")
+	indexCmd.Flags().BoolP("force", "f", false, "Force re-indexing all files")
+	rootCmd.AddCommand(indexCmd)
+
+	// --- rag — RAG management commands ---
+	ragCmd := &cobra.Command{
+		Use:   "rag",
+		Short: "Manage and query the codebase RAG index",
+	}
+	ragCmd.AddCommand(indexCmd)
+
+	ragSearchCmd := &cobra.Command{
+		Use:   "search [query]",
+		Short: "Search the codebase semantically using vector embeddings",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			limit, _ := cmd.Flags().GetInt("limit")
+			pathFilter, _ := cmd.Flags().GetString("path")
+			prov, _ := cmd.Flags().GetString("embedder")
+
+			indexPath := filepath.Join(".gocode", "rag", "index.json")
+			if _, err := os.Stat(indexPath); err == nil {
+				// use existing index
+			} else {
+				return fmt.Errorf("no RAG index found (run 'gocode index' first)")
+			}
+
+			embedder := rag.ResolveEmbedder(rag.EmbedderConfig{Provider: prov})
+			store := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+			if err := store.Load(indexPath); err != nil {
+				return fmt.Errorf("loading index: %w", err)
+			}
+
+			retriever := rag.NewRetriever(store, embedder)
+			results, err := retriever.Retrieve(context.Background(), args[0], limit, pathFilter)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println(rag.FormatContext(results))
+			return nil
+		},
+	}
+	ragSearchCmd.Flags().Int("limit", 5, "Number of snippets to retrieve")
+	ragSearchCmd.Flags().String("path", "", "Path filter glob")
+	ragSearchCmd.Flags().String("embedder", "auto", "Embedder provider: auto, ollama, openai, local")
+	ragCmd.AddCommand(ragSearchCmd)
+
+	ragStatusCmd := &cobra.Command{
+		Use:   "status",
+		Short: "Display status of the vector RAG index",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			indexPath := filepath.Join(".gocode", "rag", "index.json")
+			if _, err := os.Stat(indexPath); err != nil {
+				fmt.Println("No RAG index found. Run 'gocode index' to create one.")
+				return nil
+			}
+
+			embedder := rag.ResolveEmbedder(rag.EmbedderConfig{Provider: "auto"})
+			store := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+			if err := store.Load(indexPath); err != nil {
+				return fmt.Errorf("loading index: %w", err)
+			}
+
+			stats := store.Stats()
+			fmt.Printf("RAG Index Status:\n")
+			fmt.Printf("  File:       %s\n", indexPath)
+			fmt.Printf("  Files:      %d indexed\n", stats.TotalFiles)
+			fmt.Printf("  Chunks:     %d total\n", stats.TotalChunks)
+			fmt.Printf("  Model:      %s\n", stats.ModelName)
+			fmt.Printf("  Dimension:  %d\n", stats.Dimension)
+			fmt.Printf("  Updated:    %s\n", stats.UpdatedAt.Format("2006-01-02 15:04:05"))
+			return nil
+		},
+	}
+	ragCmd.AddCommand(ragStatusCmd)
+
+	ragCheckCmd := &cobra.Command{
+		Use:   "check [file]",
+		Short: "Analyze a file against the vector index for duplicates, patterns, and related tests",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			filePath := args[0]
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				return fmt.Errorf("reading file %s: %w", filePath, err)
+			}
+
+			indexPath := filepath.Join(".gocode", "rag", "index.json")
+			if _, err := os.Stat(indexPath); err != nil {
+				return fmt.Errorf("no RAG index found (run 'gocode index' first)")
+			}
+
+			embedder := rag.ResolveEmbedder(rag.EmbedderConfig{Provider: "auto"})
+			store := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+			if err := store.Load(indexPath); err != nil {
+				return fmt.Errorf("loading index: %w", err)
+			}
+
+			// Chunk the target file
+			chunker := rag.NewCodeChunker(rag.DefaultChunkOptions())
+			chunks := chunker.ChunkFile(filePath, string(data))
+
+			fmt.Printf("Analyzing %s (%d chunks) against vector index...\n\n", filePath, len(chunks))
+
+			retriever := rag.NewRetriever(store, embedder)
+			fileMatches := make(map[string]float64)
+
+			for i, ch := range chunks {
+				if i >= 5 {
+					break
+				}
+				results, err := retriever.Retrieve(context.Background(), ch.Content, 4, "")
+				if err != nil {
+					continue
+				}
+				for _, r := range results {
+					if r.Chunk.FilePath != filePath {
+						if r.Score > fileMatches[r.Chunk.FilePath] {
+							fileMatches[r.Chunk.FilePath] = r.Score
+						}
+					}
+				}
+			}
+
+			if len(fileMatches) == 0 {
+				fmt.Println("✓ No overlapping or duplicate implementations found across other files.")
+			} else {
+				fmt.Println("Related / Reference Files in Codebase:")
+				for p, score := range fileMatches {
+					fmt.Printf("  • %-45s (similarity score: %.3f)\n", p, score)
+				}
+			}
+
+			// Find related unit tests
+			baseName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+			testResults, _ := retriever.Retrieve(context.Background(), baseName+" test", 3, "*test*")
+			if len(testResults) > 0 {
+				fmt.Println("\nRelated Test Suites:")
+				for _, tr := range testResults {
+					fmt.Printf("  • %s (Lines %d-%d)\n", tr.Chunk.FilePath, tr.Chunk.StartLine, tr.Chunk.EndLine)
+				}
+			}
+
+			return nil
+		},
+	}
+	ragCmd.AddCommand(ragCheckCmd)
+	rootCmd.AddCommand(ragCmd)
+
+	// --- ollama — Ollama integration commands ---
+	ollamaCmd := &cobra.Command{
+		Use:   "ollama",
+		Short: "Interact with local Ollama server",
+	}
+	ollamaCmd.AddCommand(&cobra.Command{
+		Use:   "list",
+		Short: "List models installed on local Ollama",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			host := apiclient.DefaultOllamaHost()
+			prov := apiclient.NewOllamaProvider(host, apitypes.AuthSource{})
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			models, err := prov.ListLocalModels(ctx)
+			if err != nil {
+				return fmt.Errorf("connecting to Ollama (%s): %w", host, err)
+			}
+
+			if len(models) == 0 {
+				fmt.Println("No models installed on Ollama.")
+				return nil
+			}
+
+			fmt.Printf("Ollama Models (%s):\n", host)
+			for _, m := range models {
+				sizeGB := float64(m.Size) / (1024 * 1024 * 1024)
+				fmt.Printf("  • %-30s (%.2f GB, updated %s)\n", m.Name, sizeGB, m.ModifiedAt.Format("2006-01-02"))
+			}
+			return nil
+		},
+	})
+	ollamaCmd.AddCommand(&cobra.Command{
+		Use:   "status",
+		Short: "Check Ollama server health and connection",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			host := apiclient.DefaultOllamaHost()
+			prov := apiclient.NewOllamaProvider(host, apitypes.AuthSource{})
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+
+			start := time.Now()
+			models, err := prov.ListLocalModels(ctx)
+			latency := time.Since(start)
+
+			if err != nil {
+				fmt.Printf("✗ Ollama at %s is NOT responding: %v\n", host, err)
+				return nil
+			}
+
+			fmt.Printf("✓ Ollama is online at %s (latency: %s)\n", host, latency.Round(time.Millisecond))
+			fmt.Printf("  Installed models: %d\n", len(models))
+			return nil
+		},
+	})
+	rootCmd.AddCommand(ollamaCmd)
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

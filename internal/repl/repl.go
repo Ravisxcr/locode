@@ -24,6 +24,7 @@ import (
 	"github.com/Ravisxcr/gocode-rag/internal/initdeep"
 	"github.com/Ravisxcr/gocode-rag/internal/memory"
 	"github.com/Ravisxcr/gocode-rag/internal/outputstyles"
+	"github.com/Ravisxcr/gocode-rag/internal/rag"
 	"github.com/Ravisxcr/gocode-rag/internal/skills"
 	"github.com/Ravisxcr/gocode-rag/internal/tasks"
 	"github.com/Ravisxcr/gocode-rag/internal/ultraplan"
@@ -210,6 +211,8 @@ func (r *REPL) Run(ctx context.Context) error {
 			fmt.Fprintln(r.writer, "  /ultraplan   Deep planning with powerful model")
 			fmt.Fprintln(r.writer, "  /vim         Toggle vim keybindings")
 			fmt.Fprintln(r.writer, "  /output-style Show or switch output style")
+			fmt.Fprintln(r.writer, "  /index       Index workspace for vector RAG")
+			fmt.Fprintln(r.writer, "  /rag <query> Semantic search across codebase")
 			// Append custom commands to help output.
 			if cmds, err := r.customCmds.LoadAll(); err == nil && len(cmds) > 0 {
 				fmt.Fprintln(r.writer, "\nCustom commands:")
@@ -221,6 +224,12 @@ func (r *REPL) Run(ctx context.Context) error {
 					fmt.Fprintf(r.writer, "  /%-12s %s\n", cmd.Name, desc)
 				}
 			}
+			continue
+		case CmdIndex:
+			r.handleIndexCommand()
+			continue
+		case CmdRag:
+			r.handleRagCommand(input)
 			continue
 		case CmdModel:
 			r.handleModelCommand(input)
@@ -849,6 +858,89 @@ func (r *REPL) handleUndoCommand(input string) {
 	fmt.Fprintf(r.writer, "Restored to checkpoint %d.\n", id)
 }
 
+// handleIndexCommand triggers workspace indexing for vector RAG.
+func (r *REPL) handleIndexCommand() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(r.writer, "Error getting current directory: %v\n", err)
+		return
+	}
+
+	fmt.Fprintf(r.writer, "%s🔍 Indexing workspace for RAG...%s\n", cCyan, ansiReset)
+
+	embedder := rag.ResolveEmbedder(rag.EmbedderConfig{Provider: "auto"})
+	chunker := rag.NewCodeChunker(rag.DefaultChunkOptions())
+	store := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+	indexer := rag.NewIndexer(chunker, embedder, store)
+
+	spin := NewSpinner(r.writer, "Scanning and embedding code chunks...")
+	spin.Start()
+
+	opts := rag.DefaultIndexOptions(cwd)
+	opts.ProgressCb = func(file string, cur, tot int) {
+		spin.UpdateMessage(fmt.Sprintf("[%d/%d] Embedding %s...", cur, tot, file))
+	}
+
+	report, err := indexer.IndexWorkspace(context.Background(), opts)
+	spin.Stop()
+
+	if err != nil {
+		fmt.Fprintf(r.writer, "%s✗ Indexing failed: %v%s\n", cRed, err, ansiReset)
+		return
+	}
+
+	fmt.Fprintf(r.writer, "%s✓ Indexing complete!%s\n", cGreen+ansiBold, ansiReset)
+	fmt.Fprintf(r.writer, "  • Files indexed: %d (skipped: %d)\n", report.FilesIndexed, report.FilesSkipped)
+	fmt.Fprintf(r.writer, "  • Total chunks:  %d\n", report.TotalChunks)
+	fmt.Fprintf(r.writer, "  • Embedder:      %s\n", report.EmbedderModel)
+	fmt.Fprintf(r.writer, "  • Time elapsed:  %s\n", report.Duration.Round(time.Millisecond))
+	fmt.Fprintf(r.writer, "  • Index file:    %s\n\n", report.IndexPath)
+}
+
+// handleRagCommand executes a semantic search across the indexed codebase.
+func (r *REPL) handleRagCommand(input string) {
+	trimmed := strings.TrimSpace(input)
+	query := strings.TrimSpace(strings.TrimPrefix(trimmed, "/rag"))
+
+	if query == "" {
+		fmt.Fprintln(r.writer, "Usage: /rag <search query>")
+		fmt.Fprintln(r.writer, "Example: /rag authentication and token validation")
+		return
+	}
+
+	cwd, _ := os.Getwd()
+	indexPath := filepath.Join(cwd, ".gocode", "rag", "index.json")
+
+	if _, err := os.Stat(indexPath); err != nil {
+		fmt.Fprintf(r.writer, "%sNo RAG index found. Run /index first to index this workspace.%s\n", cYellow, ansiReset)
+		return
+	}
+
+	embedder := rag.ResolveEmbedder(rag.EmbedderConfig{Provider: "auto"})
+	store := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
+	if err := store.Load(indexPath); err != nil {
+		fmt.Fprintf(r.writer, "Error loading index: %v\n", err)
+		return
+	}
+
+	retriever := rag.NewRetriever(store, embedder)
+	results, err := retriever.Retrieve(context.Background(), query, 5, "")
+	if err != nil {
+		fmt.Fprintf(r.writer, "RAG search error: %v\n", err)
+		return
+	}
+
+	if len(results) == 0 {
+		fmt.Fprintln(r.writer, "No matching code snippets found.")
+		return
+	}
+
+	fmt.Fprintf(r.writer, "\n%s=== Semantic Search Results for %q ===%s\n\n", cCyan+ansiBold, query, ansiReset)
+	fmt.Fprintln(r.writer, rag.FormatContext(results))
+	fmt.Fprintln(r.writer)
+}
+
+
 // undoViaStash is the legacy stash-based undo fallback.
 func (r *REPL) undoViaStash() {
 	out, err := exec.Command("git", "diff", "--stat").Output()
@@ -1102,15 +1194,20 @@ You have tools at your disposal to solve the coding task. Follow these rules reg
 - WebSearchTool searches Wikipedia, GitHub, Reddit, Hacker News, and StackOverflow in parallel. Use it for current events, technical questions, people, projects, or any factual lookup.
 - When the user asks a follow-up like "search for that" or "look it up", construct the query from what was just discussed. Always provide the query parameter in English.
 
-# Making Code Changes
+# Making Code Changes & Writing High-Quality Code
 
-When making code changes:
+When making code changes or writing new code:
 
-1. Read the relevant file(s) first to understand the current code.
-2. Make the minimal necessary changes to accomplish the task.
-3. Ensure your changes are syntactically correct and follow the existing code style.
-4. After making changes, verify them if possible (e.g., run tests, check for syntax errors).
-5. NEVER leave placeholder comments like "// rest of code here" or "// existing code". Always include the complete code.
+1. **Search Before Implementing**: Before creating new types, functions, structs, or helper utilities, ALWAYS call 'rag_code_context' or 'rag_search' with the relevant domain terms (e.g. error handling, data models, persistence, middleware).
+2. **Zero Redundancy**: Check if a similar helper, utility, or interface already exists in the codebase. Re-use existing patterns and libraries instead of re-inventing them.
+3. **Idiomatic Consistency**: Adopt the exact conventions of the existing codebase — match naming conventions, struct tags, error wrapping styles, and concurrency patterns.
+4. **Interface & Contract Adherence**: When implementing or altering interfaces, verify existing implementations retrieved by vector search to avoid breaking changes.
+5. **Test Grounding**: Inspect existing unit tests for related components to ensure your new code satisfies established edge cases, validations, and invariants.
+6. Read the relevant file(s) first to understand the current code.
+7. Make the minimal necessary changes to accomplish the task.
+8. Ensure your changes are syntactically correct and follow the existing code style.
+9. After making changes, verify them (e.g. run unit tests, check compilation).
+10. NEVER leave placeholder comments like "// rest of code here" or "// existing code". Always include the complete code.
 
 # Communication Style
 

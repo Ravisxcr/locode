@@ -37,6 +37,8 @@ const (
 	CmdUltraPlan
 	CmdVim
 	CmdOutputStyle
+	CmdIndex
+	CmdRag
 )
 
 // ParseSlashCommand checks if input is a slash command.
@@ -49,6 +51,12 @@ func ParseSlashCommand(input string) SlashCommand {
 	}
 	if lower == "/model" || strings.HasPrefix(lower, "/model ") {
 		return CmdModel
+	}
+	if lower == "/rag" || strings.HasPrefix(lower, "/rag ") {
+		return CmdRag
+	}
+	if lower == "/index" || strings.HasPrefix(lower, "/index ") {
+		return CmdIndex
 	}
 	if lower == "/memory" || strings.HasPrefix(lower, "/memory ") {
 		return CmdMemory

@@ -1,5 +1,7 @@
 bin/
 dist/
 .port_sessions/
+.gocode/
 *.tmp
 .DS_Store
+

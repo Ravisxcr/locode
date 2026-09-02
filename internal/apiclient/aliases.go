@@ -21,6 +21,7 @@ const (
 	ProviderDeepSeek
 	ProviderCodex
 	ProviderNovita
+	ProviderOllama
 )
 
 // modelAliases maps short names to full model identifiers.
@@ -98,6 +99,23 @@ var modelAliases = map[string]string{
 	"novita-qwen-coder":  "qwen/qwen-2.5-coder-32b-instruct",
 	"novita-mistral":     "mistralai/mistral-nemo",
 	"novita-gemma-4":     "google/gemma-4-31b-it",
+	// Ollama models
+	"ollama":             "llama3.3:latest",
+	"ollama-llama":       "llama3.3:latest",
+	"ollama-llama-8b":    "llama3.1:8b",
+	"ollama-coder":       "qwen2.5-coder:latest",
+	"ollama-qwen":        "qwen2.5:latest",
+	"ollama-deepseek":    "deepseek-r1:latest",
+	"ollama-mistral":     "mistral:latest",
+	"ollama-phi":         "phi4:latest",
+	"llama3.3":           "llama3.3:latest",
+	"llama3.2":           "llama3.2:latest",
+	"llama3.1":           "llama3.1:latest",
+	"llama3":             "llama3:latest",
+	"qwen2.5":            "qwen2.5:latest",
+	"qwen2.5-coder":      "qwen2.5-coder:latest",
+	"phi4":               "phi4:latest",
+	"nomic-embed":        "nomic-embed-text",
 }
 
 // proxyProviderConfigs maps proxy provider kinds to their OpenAI-compat configs.
@@ -115,6 +133,7 @@ var proxyProviderConfigs = map[ProviderKind]struct {
 	ProviderAzure:      {"Azure OpenAI", "AZURE_OPENAI_ENDPOINT", "", "AZURE_OPENAI_API_KEY"},
 	ProviderCodex:      {"Codex", "CODEX_BASE_URL", "https://api.openai.com/v1", ""},
 	ProviderNovita:     {"Novita AI", "NOVITA_BASE_URL", "https://api.novita.ai/v3/openai", "NOVITA_API_KEY"},
+	ProviderOllama:     {"Ollama", "OLLAMA_BASE_URL", "http://localhost:11434/v1", "OLLAMA_API_KEY"},
 }
 
 // ResolveModelAlias maps short names to full model identifiers.
@@ -161,6 +180,16 @@ func DetectProviderKind(model string) ProviderKind {
 	}
 
 	resolved := strings.ToLower(ResolveModelAlias(model))
+
+	// Ollama detection by model prefix or env var
+	rawModel := strings.ToLower(strings.TrimSpace(model))
+	if strings.HasPrefix(rawModel, "ollama/") || strings.HasPrefix(rawModel, "ollama:") ||
+		strings.HasPrefix(rawModel, "ollama-") || rawModel == "ollama" {
+		return ProviderOllama
+	}
+	if envNonEmpty("OLLAMA_HOST") || envNonEmpty("OLLAMA_BASE_URL") {
+		return ProviderOllama
+	}
 
 	// Proxy provider detection by model prefix or env var
 	if strings.HasPrefix(resolved, "deepseek") {
@@ -238,6 +267,9 @@ func DetectProviderKind(model string) ProviderKind {
 	}
 	if envNonEmpty("NOVITA_API_KEY") {
 		return ProviderNovita
+	}
+	if envNonEmpty("OLLAMA_HOST") || envNonEmpty("OLLAMA_BASE_URL") {
+		return ProviderOllama
 	}
 	return ProviderAnthropic
 }

@@ -43,6 +43,12 @@ func ResolveProvider(model string, apiKeyFlag string) (Provider, string, error) 
 
 	kind := DetectProviderKind(resolvedModel)
 
+	// Ollama local provider
+	if kind == ProviderOllama {
+		auth, _ := ResolveAuthSource(ProviderOllama, apiKeyFlag)
+		return NewOllamaProvider("", auth), CleanModelName(resolvedModel), nil
+	}
+
 	// Codex backend: load auth from ~/.codex/auth.json
 	if kind == ProviderCodex {
 		auth := resolveCodexAuth(apiKeyFlag)

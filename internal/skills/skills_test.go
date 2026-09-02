@@ -5,15 +5,23 @@ import (
 	"testing"
 )
 
-func TestDefaultBuiltinsContains16Skills(t *testing.T) {
+func TestDefaultBuiltinsCount(t *testing.T) {
 	builtins := defaultBuiltins()
-	if got := len(builtins); got != 16 {
-		t.Fatalf("expected 16 built-in skills, got %d", got)
+	if got := len(builtins); got != 17 {
+		t.Fatalf("expected 17 built-in skills, got %d", got)
+	}
+
+	ragSkill, ok := builtins["rag-code-architect"]
+	if !ok {
+		t.Fatalf("expected rag-code-architect skill to exist")
+	}
+	if ragSkill.SystemPrompt == "" {
+		t.Fatalf("expected non-empty SystemPrompt for rag-code-architect")
 	}
 }
 
 func TestWave2SkillsExistWithNonEmptyPrompts(t *testing.T) {
-	wave2 := []string{"loop", "stuck", "debug", "verify", "simplify", "remember", "skillify", "batch"}
+	wave2 := []string{"loop", "stuck", "debug", "verify", "simplify", "remember", "skillify", "batch", "rag-code-architect"}
 	builtins := defaultBuiltins()
 
 	for _, name := range wave2 {
@@ -32,20 +40,20 @@ func TestWave2SkillsExistWithNonEmptyPrompts(t *testing.T) {
 	}
 }
 
-func TestSkillLoaderLoadsAll16Builtins(t *testing.T) {
+func TestSkillLoaderLoadsAllBuiltins(t *testing.T) {
 	// Use a non-existent directory so only built-ins are loaded.
 	loader := NewSkillLoader(t.TempDir())
 	skills, errs := loader.LoadAll()
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors loading skills: %v", errs)
 	}
-	if got := len(skills); got != 16 {
+	if got := len(skills); got != 17 {
 		names := make([]string, len(skills))
 		for i, s := range skills {
 			names[i] = s.Name
 		}
 		sort.Strings(names)
-		t.Fatalf("expected 16 skills from LoadAll, got %d: %v", got, names)
+		t.Fatalf("expected 17 skills from LoadAll, got %d: %v", got, names)
 	}
 }
 
