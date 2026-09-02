@@ -99,6 +99,41 @@ func TestExtractFallbackTools_ArgsFirstRegex(t *testing.T) {
 	}
 }
 
+func TestExtractFallbackTools_CLIBashFenced(t *testing.T) {
+	text := "Sure! Let's start by understanding what this project is about.\n\n```bash\nGrepTool '{\"pattern\": \"package\", \"path\": \"./\"}'\n```\n\nThis command will search for all occurrences..."
+	blocks := []apitypes.OutputContentBlock{
+		{Kind: "text", Text: text},
+	}
+
+	tools := extractFallbackTools(blocks)
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	if tools[0].name != "GrepTool" {
+		t.Errorf("expected GrepTool, got %q", tools[0].name)
+	}
+	var args map[string]interface{}
+	_ = json.Unmarshal(tools[0].input, &args)
+	if args["pattern"] != "package" || args["path"] != "./" {
+		t.Errorf("unexpected args: %v", args)
+	}
+}
+
+func TestExtractFallbackTools_CLIPlain(t *testing.T) {
+	text := "Running the tool now:\nGrepTool '{\"pattern\": \"package\", \"path\": \"./\"}'"
+	blocks := []apitypes.OutputContentBlock{
+		{Kind: "text", Text: text},
+	}
+
+	tools := extractFallbackTools(blocks)
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	if tools[0].name != "GrepTool" {
+		t.Errorf("expected GrepTool, got %q", tools[0].name)
+	}
+}
+
 func TestPermissions_ReadOnlyAutoApproved(t *testing.T) {
 	policy := &PermissionPolicy{
 		Mode: WorkspaceWrite,

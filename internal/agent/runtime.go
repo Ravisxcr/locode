@@ -338,9 +338,10 @@ func (r *ConversationRuntime) streamLoop(ctx context.Context) (<-chan apitypes.S
 
 var (
 	xmlToolCallRegex = regexp.MustCompile("(?s)<tool_call>(?:```(?:json)?)?\\s*(\\{.*?\\})\\s*(?:```)?</tool_call>")
-	fencedCodeRegex  = regexp.MustCompile("(?s)```(?:json)?\\s*([\\s\\S]*?)\\s*```")
+	fencedCodeRegex  = regexp.MustCompile("(?s)```(?:[a-zA-Z0-9_+-]+)?\\s*([\\s\\S]*?)\\s*```")
 	jsonNameFirstRe  = regexp.MustCompile(`(?s)\{\s*"(?:name|tool|tool_name)"\s*:\s*"([^"]+)"\s*,\s*"(?:arguments|parameters|input)"\s*:\s*(\{.*?\})\s*\}`)
 	jsonArgsFirstRe  = regexp.MustCompile(`(?s)\{\s*"(?:arguments|parameters|input)"\s*:\s*(\{.*?\})\s*,\s*"(?:name|tool|tool_name)"\s*:\s*"([^"]+)"\s*\}`)
+	cliToolCallRe    = regexp.MustCompile(`(?s)^\s*([a-zA-Z0-9_]+)\s*[:\(]?\s*['"]?(\{[\s\S]*?\})['"]?\s*\)?\s*$`)
 )
 
 func parseToolMap(obj map[string]interface{}, id string) *toolUseInfo {
@@ -369,6 +370,24 @@ func parseToolMap(obj map[string]interface{}, id string) *toolUseInfo {
 		name:  name,
 		input: args,
 	}
+}
+
+func parseCLIToolCall(text string, id string) *toolUseInfo {
+	text = strings.TrimSpace(text)
+	m := cliToolCallRe.FindStringSubmatch(text)
+	if len(m) >= 3 {
+		name := strings.TrimSpace(m[1])
+		rawJSON := strings.TrimSpace(m[2])
+		var obj map[string]interface{}
+		if err := json.Unmarshal([]byte(rawJSON), &obj); err == nil {
+			return &toolUseInfo{
+				id:    id,
+				name:  name,
+				input: json.RawMessage(rawJSON),
+			}
+		}
+	}
+	return nil
 }
 
 func extractFallbackTools(contentBlocks []apitypes.OutputContentBlock) []toolUseInfo {
@@ -419,6 +438,17 @@ func extractFallbackTools(contentBlocks []apitypes.OutputContentBlock) []toolUse
 								tools = append(tools, *t)
 							}
 						}
+					} else {
+						// Check CLI-style tool call inside fenced body: ToolName '{"..."}'
+						if t := parseCLIToolCall(fencedBody, fmt.Sprintf("call_%d", len(tools)+1)); t != nil {
+							tools = append(tools, *t)
+						} else {
+							for _, line := range strings.Split(fencedBody, "\n") {
+								if t := parseCLIToolCall(line, fmt.Sprintf("call_%d", len(tools)+1)); t != nil {
+									tools = append(tools, *t)
+								}
+							}
+						}
 					}
 				}
 			}
@@ -463,6 +493,19 @@ func extractFallbackTools(contentBlocks []apitypes.OutputContentBlock) []toolUse
 						name:  m[2],
 						input: json.RawMessage(m[1]),
 					})
+				}
+			}
+		}
+
+		// 5. Line-by-line CLI style: ToolName '{"..."}'
+		if len(tools) == 0 {
+			for _, line := range strings.Split(text, "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				if t := parseCLIToolCall(line, fmt.Sprintf("call_%d", len(tools)+1)); t != nil {
+					tools = append(tools, *t)
 				}
 			}
 		}
