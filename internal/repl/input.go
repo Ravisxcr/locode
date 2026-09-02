@@ -85,6 +85,9 @@ func ParseSlashCommand(input string) SlashCommand {
 	if lower == "/undo" || strings.HasPrefix(lower, "/undo ") {
 		return CmdUndo
 	}
+	if lower == "/commit" || strings.HasPrefix(lower, "/commit ") {
+		return CmdCommit
+	}
 	switch lower {
 	case "/exit":
 		return CmdExit
@@ -114,8 +117,6 @@ func ParseSlashCommand(input string) SlashCommand {
 		return CmdConnect
 	case "/share":
 		return CmdShare
-	case "/commit":
-		return CmdCommit
 	default:
 		return CmdNone
 	}

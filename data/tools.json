@@ -198,5 +198,18 @@
       },
       "required": ["symbol_or_task"]
     }
+  },
+  {
+    "name": "git_commit",
+    "responsibility": "commit staged or unstaged changes to git with a conventional commit message",
+    "description": "Commit code changes to git with a Conventional Commit message (feat, fix, refactor, test, docs, etc.). If 'message' is omitted, an intelligent conventional commit message is automatically generated based on the git diff.",
+    "source_hint": "git/commit",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "message": { "type": "string", "description": "Optional conventional commit message (e.g. 'feat(auth): add JWT verification middleware'). If omitted, automatically generated from diff." },
+        "all": { "type": "boolean", "description": "Whether to stage unstaged changes before committing (default: true)" }
+      }
+    }
   }
 ]

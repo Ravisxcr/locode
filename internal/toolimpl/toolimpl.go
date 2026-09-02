@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ravisxcr/gocode-rag/internal/gitcommit"
 	"github.com/Ravisxcr/gocode-rag/internal/pdf"
 )
 
@@ -109,6 +110,11 @@ func NewRegistry() *Registry {
 	r.executors["websearchtool"] = webSearch
 	r.executors["websearch"] = webSearch
 	r.executors["web_search"] = webSearch
+
+	gitCommitTool := &GitCommitTool{}
+	r.executors["git_commit"] = gitCommitTool
+	r.executors["gitcommit"] = gitCommitTool
+	r.executors["commit"] = gitCommitTool
 
 	promptTool := &PromptTool{}
 	r.executors["prompt"] = promptTool
@@ -1100,5 +1106,45 @@ func (t *PromptTool) Execute(params map[string]interface{}) ToolResult {
 	return ToolResult{
 		Success: false,
 		Error:   "'prompt' is a CLI shell command for human users (e.g. 'gocode prompt <query>'), not an agent tool. You are already running as the AI agent. Please directly synthesize your answer to the user's question now.",
+	}
+}
+
+// --- GitCommitTool ---
+
+// GitCommitTool commits staged or unstaged changes with a conventional commit message.
+type GitCommitTool struct{}
+
+func (t *GitCommitTool) Execute(params map[string]interface{}) ToolResult {
+	if !gitcommit.IsInsideWorkTree() {
+		return ToolResult{Success: false, Error: "not a git repository"}
+	}
+
+	autoStage := true
+	if v, ok := params["all"].(bool); ok {
+		autoStage = v
+	}
+
+	diff, stat, hasChanges, err := gitcommit.GetDiff(autoStage)
+	if err != nil {
+		return ToolResult{Success: false, Error: fmt.Sprintf("git diff error: %v", err)}
+	}
+	if !hasChanges {
+		return ToolResult{Success: true, Output: "No changes to commit. Working directory clean."}
+	}
+
+	msg, _ := params["message"].(string)
+	msg = strings.TrimSpace(msg)
+	if msg == "" {
+		msg = gitcommit.HeuristicMessage(stat, diff)
+	}
+
+	sha, out, err := gitcommit.ExecuteCommit(msg)
+	if err != nil {
+		return ToolResult{Success: false, Error: fmt.Sprintf("commit failed: %v\n%s", err, out)}
+	}
+
+	return ToolResult{
+		Success: true,
+		Output:  fmt.Sprintf("✓ Successfully committed [%s]: %s\n\nChanges:\n%s", sha, strings.Split(msg, "\n")[0], stat),
 	}
 }

@@ -644,6 +644,9 @@ func (r *ConversationRuntime) GetSession() []apitypes.InputMessage { return r.se
 // GetModel returns the model name configured for this runtime.
 func (r *ConversationRuntime) GetModel() string { return r.model }
 
+// GetProvider returns the LLM provider configured for this runtime.
+func (r *ConversationRuntime) GetProvider() apiclient.Provider { return r.provider }
+
 // RestoreSession replaces the current session with a saved one.
 func (r *ConversationRuntime) RestoreSession(messages []apitypes.InputMessage) {
 	r.session = messages

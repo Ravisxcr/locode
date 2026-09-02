@@ -21,6 +21,7 @@ import (
 	"github.com/Ravisxcr/gocode-rag/internal/checkpoint"
 	"github.com/Ravisxcr/gocode-rag/internal/customcmd"
 	"github.com/Ravisxcr/gocode-rag/internal/dream"
+	"github.com/Ravisxcr/gocode-rag/internal/gitcommit"
 	"github.com/Ravisxcr/gocode-rag/internal/initdeep"
 	"github.com/Ravisxcr/gocode-rag/internal/memory"
 	"github.com/Ravisxcr/gocode-rag/internal/outputstyles"
@@ -286,29 +287,7 @@ func (r *REPL) Run(ctx context.Context) error {
 			fmt.Fprintf(r.writer, "Session exported to: %s\n", tmpFile)
 			continue
 		case CmdCommit:
-			// Check both unstaged and staged changes
-			stat, _ := exec.Command("git", "diff", "--stat").Output()
-			cachedStat, _ := exec.Command("git", "diff", "--cached", "--stat").Output()
-			combinedStat := strings.TrimSpace(string(stat)) + strings.TrimSpace(string(cachedStat))
-			if combinedStat == "" {
-				fmt.Fprintln(r.writer, "No changes to commit.")
-				continue
-			}
-			exec.Command("git", "add", "-A").Run()
-			// Re-read staged stat after add -A for the commit message
-			finalStat, _ := exec.Command("git", "diff", "--cached", "--stat").Output()
-			msg := "gocode: auto-commit"
-			if lines := strings.Split(strings.TrimSpace(string(finalStat)), "\n"); len(lines) > 0 && lines[0] != "" {
-				last := strings.TrimSpace(lines[len(lines)-1])
-				msg = "gocode: " + last
-			}
-			msg += "\n\nCo-Authored-By: gocoder6969 <gocoder6969@users.noreply.github.com>"
-			out, commitErr := exec.Command("git", "commit", "-m", msg).CombinedOutput()
-			if commitErr != nil {
-				fmt.Fprintf(r.writer, "Commit error: %v\n%s\n", commitErr, string(out))
-			} else {
-				fmt.Fprintln(r.writer, strings.TrimSpace(string(out)))
-			}
+			r.handleCommitCommand(input)
 			continue
 		case CmdMemory:
 			r.handleMemoryCommand(input)
@@ -651,6 +630,101 @@ func (r *REPL) handleDiffCommand() {
 		return
 	}
 	fmt.Fprintln(r.writer, diff)
+}
+
+// handleCommitCommand processes the /commit slash command with conventional commit generation.
+func (r *REPL) handleCommitCommand(input string) {
+	if !gitcommit.IsInsideWorkTree() {
+		fmt.Fprintf(r.writer, "  %s✗ Not a git repository.%s\n\n", cRed, ansiReset)
+		return
+	}
+
+	trimmed := strings.TrimSpace(strings.TrimPrefix(input, "/commit"))
+	skipPrompt := false
+	var customMsg string
+	if trimmed == "-y" || trimmed == "--yes" {
+		skipPrompt = true
+	} else if strings.HasPrefix(trimmed, "-m ") {
+		customMsg = strings.Trim(strings.TrimSpace(trimmed[3:]), "\"'")
+	} else if trimmed != "" && !strings.HasPrefix(trimmed, "-") {
+		customMsg = trimmed
+	}
+
+	diff, stat, hasChanges, err := gitcommit.GetDiff(true)
+	if err != nil {
+		fmt.Fprintf(r.writer, "  %s✗ Git error: %v%s\n\n", cRed, err, ansiReset)
+		return
+	}
+	if !hasChanges {
+		fmt.Fprintf(r.writer, "  %sNo changes to commit.%s\n\n", cGray, ansiReset)
+		return
+	}
+
+	commitMsg := customMsg
+	if commitMsg == "" {
+		spinner := NewSpinner(r.writer, "Generating conventional commit message...")
+		spinner.Start()
+		var prov apiclient.Provider
+		var model string
+		if r.runtime != nil {
+			prov = r.runtime.GetProvider()
+			model = r.runtime.GetModel()
+		}
+		generated, genErr := gitcommit.GenerateMessage(context.Background(), prov, model, diff, stat)
+		spinner.Stop()
+		if genErr != nil || generated == "" {
+			commitMsg = gitcommit.HeuristicMessage(stat, diff)
+		} else {
+			commitMsg = generated
+		}
+	}
+
+	fmt.Fprintf(r.writer, "\n  %sChanges:%s\n", cCyan+ansiBold, ansiReset)
+	for _, line := range strings.Split(stat, "\n") {
+		fmt.Fprintf(r.writer, "    %s%s%s\n", cGray, line, ansiReset)
+	}
+	fmt.Fprintf(r.writer, "\n  %sProposed Commit Message:%s\n", cGreen+ansiBold, ansiReset)
+	for _, line := range strings.Split(commitMsg, "\n") {
+		fmt.Fprintf(r.writer, "    %s%s%s\n", cWhite, line, ansiReset)
+	}
+	fmt.Fprintln(r.writer)
+
+	if !skipPrompt {
+		fmt.Fprintf(r.writer, "  Commit with this message? %s[y]es%s  %s[e]dit%s  %s[n]o%s: ", cGreen, ansiReset, cYellow, ansiReset, cRed, ansiReset)
+		scanner := bufio.NewScanner(r.reader)
+		if !scanner.Scan() {
+			fmt.Fprintf(r.writer, "  %sCommit cancelled.%s\n\n", cGray, ansiReset)
+			return
+		}
+		ans := strings.ToLower(strings.TrimSpace(scanner.Text()))
+		if ans == "e" || ans == "edit" {
+			fmt.Fprintf(r.writer, "  Enter commit message: ")
+			if !scanner.Scan() {
+				fmt.Fprintf(r.writer, "  %sCommit cancelled.%s\n\n", cGray, ansiReset)
+				return
+			}
+			custom := strings.TrimSpace(scanner.Text())
+			if custom == "" {
+				fmt.Fprintf(r.writer, "  %sCommit cancelled: empty message.%s\n\n", cGray, ansiReset)
+				return
+			}
+			commitMsg = custom
+		} else if ans != "y" && ans != "yes" && ans != "" {
+			fmt.Fprintf(r.writer, "  %sCommit cancelled.%s\n\n", cGray, ansiReset)
+			return
+		}
+	}
+
+	sha, out, err := gitcommit.ExecuteCommit(commitMsg)
+	if err != nil {
+		fmt.Fprintf(r.writer, "  %s✗ Commit error: %v%s\n\n", cRed, err, ansiReset)
+		return
+	}
+	if sha != "" {
+		fmt.Fprintf(r.writer, "  %s✓ Committed [%s]: %s%s\n\n", cGreen+ansiBold, sha, strings.Split(commitMsg, "\n")[0], ansiReset)
+	} else {
+		fmt.Fprintf(r.writer, "  %s%s%s\n\n", cGreen, out, ansiReset)
+	}
 }
 
 // handleMemoryCommand processes the /memory slash command.

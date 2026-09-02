@@ -33,6 +33,7 @@ import (
 	"github.com/Ravisxcr/gocode-rag/internal/cron"
 	"github.com/Ravisxcr/gocode-rag/internal/editorcompat"
 	"github.com/Ravisxcr/gocode-rag/internal/execution"
+	"github.com/Ravisxcr/gocode-rag/internal/gitcommit"
 	"github.com/Ravisxcr/gocode-rag/internal/hashline"
 	"github.com/Ravisxcr/gocode-rag/internal/hooks"
 	"github.com/Ravisxcr/gocode-rag/internal/initdeep"
@@ -1284,6 +1285,116 @@ func main() {
 	promptCmd.Flags().Bool("rag", false, "Enable automatic RAG context augmentation from indexed codebase")
 	promptCmd.Flags().String("ollama-host", "", "Custom Ollama host endpoint (e.g. 192.168.1.6:11434 or http://192.168.1.6:11434)")
 	rootCmd.AddCommand(promptCmd)
+
+	// commit
+	var (
+		commitYes     bool
+		commitMsgFlag string
+		commitDryRun  bool
+		commitNoStage bool
+	)
+	commitCmd := &cobra.Command{
+		Use:   "commit",
+		Short: "Generate a conventional commit message from git diff and commit changes",
+		Long: `Inspects staged or unstaged changes, generates a Conventional Commit message
+(feat, fix, refactor, etc.) using the active LLM or rule-based heuristics,
+and commits the changes to git.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !gitcommit.IsInsideWorkTree() {
+				return fmt.Errorf("not a git repository")
+			}
+
+			modelFlag, _ := cmd.Flags().GetString("model")
+			providerFlag, _ := cmd.Flags().GetString("provider")
+			apiKeyFlag, _ := cmd.Flags().GetString("api-key")
+			ollamaHostFlag, _ := cmd.Flags().GetString("ollama-host")
+
+			diff, stat, hasChanges, err := gitcommit.GetDiff(!commitNoStage)
+			if err != nil {
+				return fmt.Errorf("git error: %w", err)
+			}
+			if !hasChanges {
+				fmt.Println("No changes to commit.")
+				return nil
+			}
+
+			commitMsg := commitMsgFlag
+			if commitMsg == "" {
+				if ollamaHostFlag != "" {
+					os.Setenv("OLLAMA_HOST", ollamaHostFlag)
+				}
+				model := modelFlag
+				if providerFlag == "ollama" && !strings.HasPrefix(model, "ollama/") {
+					model = "ollama/" + model
+				}
+				prov, resolvedModel, _ := apiclient.ResolveProvider(model, apiKeyFlag)
+
+				fmt.Println("Generating conventional commit message...")
+				generated, genErr := gitcommit.GenerateMessage(context.Background(), prov, resolvedModel, diff, stat)
+				if genErr != nil || generated == "" {
+					commitMsg = gitcommit.HeuristicMessage(stat, diff)
+				} else {
+					commitMsg = generated
+				}
+			}
+
+			fmt.Println("\nChanges:")
+			fmt.Println(stat)
+			fmt.Println("\nProposed Commit Message:")
+			for _, line := range strings.Split(commitMsg, "\n") {
+				fmt.Printf("  %s\n", line)
+			}
+			fmt.Println()
+
+			if commitDryRun {
+				fmt.Println("[dry-run] Commit was not executed.")
+				return nil
+			}
+
+			if !commitYes {
+				fmt.Print("Commit with this message? [y]es  [e]dit  [n]o: ")
+				reader := bufio.NewReader(os.Stdin)
+				input, err := reader.ReadString('\n')
+				if err != nil {
+					return nil
+				}
+				ans := strings.ToLower(strings.TrimSpace(input))
+				if ans == "e" || ans == "edit" {
+					fmt.Print("Enter commit message: ")
+					custom, _ := reader.ReadString('\n')
+					custom = strings.TrimSpace(custom)
+					if custom == "" {
+						fmt.Println("Commit cancelled: empty message.")
+						return nil
+					}
+					commitMsg = custom
+				} else if ans != "y" && ans != "yes" && ans != "" {
+					fmt.Println("Commit cancelled.")
+					return nil
+				}
+			}
+
+			sha, out, err := gitcommit.ExecuteCommit(commitMsg)
+			if err != nil {
+				return err
+			}
+			if sha != "" {
+				fmt.Printf("✓ Committed [%s]: %s\n", sha, strings.Split(commitMsg, "\n")[0])
+			} else {
+				fmt.Println(out)
+			}
+			return nil
+		},
+	}
+	commitCmd.Flags().BoolVarP(&commitYes, "yes", "y", false, "Commit automatically without confirmation prompt")
+	commitCmd.Flags().StringVarP(&commitMsgFlag, "message", "m", "", "Use custom commit message instead of generating one")
+	commitCmd.Flags().BoolVar(&commitDryRun, "dry-run", false, "Preview generated message without committing")
+	commitCmd.Flags().BoolVar(&commitNoStage, "no-stage", false, "Do not auto-stage unstaged changes with git add -A")
+	commitCmd.Flags().String("model", "", "Model name or alias (e.g. 'llama3.3', 'sonnet')")
+	commitCmd.Flags().String("provider", "", "LLM provider: ollama, anthropic, openai, etc.")
+	commitCmd.Flags().String("api-key", "", "API key override")
+	commitCmd.Flags().String("ollama-host", "", "Ollama host endpoint")
+	rootCmd.AddCommand(commitCmd)
 
 	// 21. mcp-serve
 	mcpServeCmd := &cobra.Command{
