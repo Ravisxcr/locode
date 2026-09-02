@@ -1093,49 +1093,12 @@ func FormatFile(path string) {
 
 // --- PromptTool ---
 
-// PromptTool executes a one-shot prompt or sub-agent query using gocode prompt.
+// PromptTool intercepts calls to "prompt" and informs the agent to respond directly.
 type PromptTool struct{}
 
 func (t *PromptTool) Execute(params map[string]interface{}) ToolResult {
-	text, _ := params["text"].(string)
-	if text == "" {
-		text, _ = params["prompt"].(string)
+	return ToolResult{
+		Success: false,
+		Error:   "'prompt' is a CLI shell command for human users (e.g. 'gocode prompt <query>'), not an agent tool. You are already running as the AI agent. Please directly synthesize your answer to the user's question now.",
 	}
-	if text == "" {
-		text, _ = params["task"].(string)
-	}
-	if text == "" {
-		return ToolResult{Success: false, Error: "missing required param: text or prompt"}
-	}
-
-	exe, err := os.Executable()
-	if err != nil {
-		exe = "gocode"
-	}
-
-	args := []string{"prompt"}
-	if model, ok := params["model"].(string); ok && model != "" {
-		args = append(args, "--model", model)
-	}
-	if provider, ok := params["provider"].(string); ok && provider != "" {
-		args = append(args, "--provider", provider)
-	}
-	if rag, ok := params["rag"].(bool); ok && rag {
-		args = append(args, "--rag")
-	} else if ragStr, ok := params["rag"].(string); ok && strings.EqualFold(ragStr, "true") {
-		args = append(args, "--rag")
-	}
-	args = append(args, text)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return ToolResult{Success: false, Error: fmt.Sprintf("executing prompt: %v\n%s", err, string(out))}
-	}
-
-	return ToolResult{Success: true, Output: string(out)}
 }

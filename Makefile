@@ -23,3 +23,6 @@ index: build
 
 doctor: build
 	./bin/$(BINARY_NAME) doctor
+
+rag:
+	export OLLAMA_HOST=192.168.1.6
