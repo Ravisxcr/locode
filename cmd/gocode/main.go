@@ -762,7 +762,7 @@ func main() {
 					vstore := rag.NewVectorStore(embedder.ModelName(), embedder.Dimension())
 					if err := vstore.Load(indexPath); err == nil {
 						retriever := rag.NewRetriever(vstore, embedder)
-						if results, err := retriever.Retrieve(context.Background(), resolvedModel+" codebase overview", 4, ""); err == nil && len(results) > 0 {
+						if results, err := retriever.Retrieve(context.Background(), "codebase architecture purpose overview", 6, ""); err == nil && len(results) > 0 {
 							systemPrompt += "\n\n# Codebase Context (from Vector RAG)\n\n" + rag.FormatContext(results)
 						}
 					}

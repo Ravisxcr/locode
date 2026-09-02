@@ -198,5 +198,21 @@
       },
       "required": ["symbol_or_task"]
     }
+  },
+  {
+    "name": "prompt",
+    "responsibility": "run a one-shot LLM prompt or sub-agent query",
+    "description": "Execute a one-shot prompt query with optional provider, model, and RAG context augmentation. Useful for delegating sub-tasks or querying alternate models.",
+    "source_hint": "tools/prompt",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "The prompt text to send" },
+        "model": { "type": "string", "description": "Optional model name or alias (e.g. 'llama3.3', 'sonnet', 'gpt-4o')" },
+        "provider": { "type": "string", "description": "Optional provider name (e.g. 'ollama', 'anthropic', 'openai')" },
+        "rag": { "type": "boolean", "description": "Whether to enable codebase vector RAG context augmentation" }
+      },
+      "required": ["text"]
+    }
   }
 ]

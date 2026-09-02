@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -364,7 +365,7 @@ func TestStreamLoop_FallbackToolUse_MultiTurn(t *testing.T) {
 		t.Errorf("expected tool to execute 1 time, got %d", toolExecCount)
 	}
 
-	if !contains(outputText, "The codebase is a test project.") {
+	if !strings.Contains(outputText, "The codebase is a test project.") {
 		t.Errorf("expected final answer to be streamed, got %q", outputText)
 	}
 }
@@ -483,15 +484,67 @@ func TestSendLoop_FallbackToolUse_MultiTurn(t *testing.T) {
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > 0 && len(substr) > 0 && stringContains(s, substr)))
+func TestDetailedToolCallback_ReportsError(t *testing.T) {
+	var callbackReportedName string
+	var callbackReportedSuccess bool
+	var callbackReportedOutput string
+
+	cb := &mockDetailedCallback{
+		onEndWithResult: func(name string, success bool, output string) {
+			callbackReportedName = name
+			callbackReportedSuccess = success
+			callbackReportedOutput = output
+		},
+	}
+
+	executor := NewStaticExecutor() // no tools registered, will fail with "unknown tool: prompt"
+
+	prov := &mockProvider{
+		turns: []func(req apitypes.MessageRequest) []apitypes.StreamEvent{
+			func(req apitypes.MessageRequest) []apitypes.StreamEvent {
+				return []apitypes.StreamEvent{
+					{
+						Kind: "content_block_start",
+						ContentBlock: &apitypes.OutputContentBlock{
+							Kind:  "tool_use",
+							ID:    "call_err_1",
+							Name:  "prompt",
+							Input: json.RawMessage(`{"text":"hello"}`),
+						},
+					},
+					{Kind: "message_stop"},
+				}
+			},
+		},
+	}
+
+	rt := NewConversationRuntime(RuntimeOptions{
+		Provider: prov,
+		Executor: executor,
+		Model:    "test-model",
+		ToolCb:   cb,
+	})
+
+	_, _ = rt.SendUserMessage(context.Background(), "Run prompt")
+
+	if callbackReportedName != "prompt" {
+		t.Errorf("expected name prompt, got %q", callbackReportedName)
+	}
+	if callbackReportedSuccess != false {
+		t.Errorf("expected failure, got success")
+	}
+	if callbackReportedOutput != "unknown tool: prompt" {
+		t.Errorf("expected error 'unknown tool: prompt', got %q", callbackReportedOutput)
+	}
 }
 
-func stringContains(s, substr string) bool {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+type mockDetailedCallback struct {
+	NoOpToolCallback
+	onEndWithResult func(name string, success bool, output string)
+}
+
+func (m *mockDetailedCallback) OnToolEndWithResult(name string, success bool, output string) {
+	if m.onEndWithResult != nil {
+		m.onEndWithResult(name, success, output)
 	}
-	return false
 }

@@ -110,6 +110,11 @@ func NewRegistry() *Registry {
 	r.executors["websearch"] = webSearch
 	r.executors["web_search"] = webSearch
 
+	promptTool := &PromptTool{}
+	r.executors["prompt"] = promptTool
+	r.executors["gocode_prompt"] = promptTool
+	r.executors["prompttool"] = promptTool
+
 	return r
 }
 
@@ -1084,4 +1089,53 @@ func FormatFile(path string) {
 	if cmd != nil {
 		_ = cmd.Run()
 	}
+}
+
+// --- PromptTool ---
+
+// PromptTool executes a one-shot prompt or sub-agent query using gocode prompt.
+type PromptTool struct{}
+
+func (t *PromptTool) Execute(params map[string]interface{}) ToolResult {
+	text, _ := params["text"].(string)
+	if text == "" {
+		text, _ = params["prompt"].(string)
+	}
+	if text == "" {
+		text, _ = params["task"].(string)
+	}
+	if text == "" {
+		return ToolResult{Success: false, Error: "missing required param: text or prompt"}
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		exe = "gocode"
+	}
+
+	args := []string{"prompt"}
+	if model, ok := params["model"].(string); ok && model != "" {
+		args = append(args, "--model", model)
+	}
+	if provider, ok := params["provider"].(string); ok && provider != "" {
+		args = append(args, "--provider", provider)
+	}
+	if rag, ok := params["rag"].(bool); ok && rag {
+		args = append(args, "--rag")
+	} else if ragStr, ok := params["rag"].(string); ok && strings.EqualFold(ragStr, "true") {
+		args = append(args, "--rag")
+	}
+	args = append(args, text)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.Env = os.Environ()
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return ToolResult{Success: false, Error: fmt.Sprintf("executing prompt: %v\n%s", err, string(out))}
+	}
+
+	return ToolResult{Success: true, Output: string(out)}
 }

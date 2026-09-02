@@ -32,11 +32,17 @@ type ToolCallback interface {
 	OnToolEnd(name string, isError bool)
 }
 
+// DetailedToolCallback is an optional interface for tool callbacks that accept result output.
+type DetailedToolCallback interface {
+	OnToolEndWithResult(name string, success bool, output string)
+}
+
 // NoOpToolCallback does nothing.
 type NoOpToolCallback struct{}
 
-func (NoOpToolCallback) OnToolStart(string, map[string]interface{}) {}
-func (NoOpToolCallback) OnToolEnd(string, bool)                     {}
+func (NoOpToolCallback) OnToolStart(string, map[string]interface{})             {}
+func (NoOpToolCallback) OnToolEnd(string, bool)                                 {}
+func (NoOpToolCallback) OnToolEndWithResult(string, bool, string)               {}
 
 // ConversationRuntime orchestrates the agentic tool-use loop.
 //  ConversationRuntime<C: ApiClient, T: ToolExecutor>.
@@ -487,14 +493,22 @@ func (r *ConversationRuntime) executeTool(tu toolUseInfo) apitypes.ToolResult {
 	// Check permissions
 	allowed, reason := r.permPolicy.Authorize(tu.name, string(inputStr))
 	if !allowed {
-		r.toolCb.OnToolEnd(tu.name, false)
+		if dtc, ok := r.toolCb.(DetailedToolCallback); ok {
+			dtc.OnToolEndWithResult(tu.name, false, reason)
+		} else {
+			r.toolCb.OnToolEnd(tu.name, false)
+		}
 		return apitypes.ToolResult{ToolUseID: tu.id, Output: reason, IsError: true}
 	}
 
 	// Pre-tool hook
 	preResult := r.hooks.PreToolUse(tu.name, inputMap)
 	if preResult.IsDenied() {
-		r.toolCb.OnToolEnd(tu.name, false)
+		if dtc, ok := r.toolCb.(DetailedToolCallback); ok {
+			dtc.OnToolEndWithResult(tu.name, false, "denied by pre-tool hook")
+		} else {
+			r.toolCb.OnToolEnd(tu.name, false)
+		}
 		return ToolResultFromHookDenial(tu.id, tu.name, preResult)
 	}
 
@@ -503,7 +517,11 @@ func (r *ConversationRuntime) executeTool(tu toolUseInfo) apitypes.ToolResult {
 		escalateInput, _ := json.Marshal(inputMap)
 		allowed, reason := r.permPolicy.Authorize(tu.name, string(escalateInput))
 		if !allowed {
-			r.toolCb.OnToolEnd(tu.name, false)
+			if dtc, ok := r.toolCb.(DetailedToolCallback); ok {
+				dtc.OnToolEndWithResult(tu.name, false, reason)
+			} else {
+				r.toolCb.OnToolEnd(tu.name, false)
+			}
 			return apitypes.ToolResult{ToolUseID: tu.id, Output: reason, IsError: true}
 		}
 	}
@@ -515,7 +533,11 @@ func (r *ConversationRuntime) executeTool(tu toolUseInfo) apitypes.ToolResult {
 
 	// Execute
 	result := r.executor.Execute(tu.name, inputMap)
-	r.toolCb.OnToolEnd(tu.name, !result.IsError)
+	if dtc, ok := r.toolCb.(DetailedToolCallback); ok {
+		dtc.OnToolEndWithResult(tu.name, !result.IsError, result.Output)
+	} else {
+		r.toolCb.OnToolEnd(tu.name, !result.IsError)
+	}
 	result.ToolUseID = tu.id
 	result.Output = MergeHookFeedback(preResult.Messages, result.Output, false)
 
