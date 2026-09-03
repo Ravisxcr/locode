@@ -22,7 +22,7 @@ func TestRagSearchTool(t *testing.T) {
 		},
 	}
 	embs, _ := embedder.EmbedDocuments(context.Background(), []string{chunks[0].Content})
-	_ = store.AddDocuments(chunks, embs)
+	_ = store.AddChunks(chunks, embs)
 
 	retriever := NewRetriever(store, embedder)
 	tool := NewRagSearchTool(retriever)
@@ -63,7 +63,7 @@ func TestRagCodeContextTool(t *testing.T) {
 		},
 	}
 	embs, _ := embedder.EmbedDocuments(context.Background(), []string{chunks[0].Content, chunks[1].Content})
-	_ = store.AddDocuments(chunks, embs)
+	_ = store.AddChunks(chunks, embs)
 
 	retriever := NewRetriever(store, embedder)
 	contextTool := NewRagCodeContextTool(retriever)

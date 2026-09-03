@@ -15,6 +15,7 @@ import (
 
 	"github.com/Ravisxcr/gocode-rag/internal/apiclient"
 	"github.com/Ravisxcr/gocode-rag/internal/apitypes"
+	"github.com/tmc/langchaingo/embeddings"
 )
 
 // Embedder generates vector embeddings for text and code chunks.
@@ -97,140 +98,128 @@ func ResolveEmbedder(cfg EmbedderConfig) Embedder {
 	}
 }
 
-// --- Ollama Embedder ---
+// --- LangChain Embedder Adapter ---
 
-type OllamaEmbedder struct {
-	client    *apiclient.OllamaProvider
-	model     string
+// LangChainEmbedder adapts a langchaingo embeddings.Embedder to the rag.Embedder interface.
+type LangChainEmbedder struct {
+	inner     embeddings.Embedder
+	modelName string
 	dimension int
 }
 
-// NewOllamaEmbedder creates an Ollama-backed embedder.
-func NewOllamaEmbedder(host, model string) *OllamaEmbedder {
-	if model == "" {
-		model = "nomic-embed-text"
-	}
-	prov := apiclient.NewOllamaProvider(host, apitypes.AuthSource{})
-	return &OllamaEmbedder{
-		client:    prov,
-		model:     model,
-		dimension: 768, // standard for nomic-embed-text; updated dynamically on first call
+// NewLangChainEmbedder wraps any langchaingo embeddings.Embedder into rag.Embedder.
+func NewLangChainEmbedder(inner embeddings.Embedder, modelName string, dimension int) *LangChainEmbedder {
+	return &LangChainEmbedder{
+		inner:     inner,
+		modelName: modelName,
+		dimension: dimension,
 	}
 }
 
-func (e *OllamaEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
-	emb, err := e.client.GenerateEmbedding(ctx, e.model, text)
+func (l *LangChainEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
+	emb, err := l.inner.EmbedQuery(ctx, text)
 	if err != nil {
 		return nil, err
 	}
 	if len(emb) > 0 {
-		e.dimension = len(emb)
+		l.dimension = len(emb)
 	}
 	return emb, nil
 }
 
-func (e *OllamaEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
-	embs, err := e.client.GenerateEmbeddingsBatch(ctx, e.model, texts)
+func (l *LangChainEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
+	embs, err := l.inner.EmbedDocuments(ctx, texts)
 	if err != nil {
 		return nil, err
 	}
 	if len(embs) > 0 && len(embs[0]) > 0 {
-		e.dimension = len(embs[0])
+		l.dimension = len(embs[0])
 	}
 	return embs, nil
 }
 
-func (e *OllamaEmbedder) Dimension() int   { return e.dimension }
-func (e *OllamaEmbedder) ModelName() string { return "ollama/" + e.model }
+func (l *LangChainEmbedder) Dimension() int   { return l.dimension }
+func (l *LangChainEmbedder) ModelName() string { return l.modelName }
+
+// --- Ollama Embedder ---
+
+// NewOllamaEmbedder creates an Ollama-backed embedder powered by langchaingo/embeddings.
+func NewOllamaEmbedder(host, model string) Embedder {
+	if model == "" {
+		model = "nomic-embed-text"
+	}
+	prov := apiclient.NewOllamaProvider(host, apitypes.AuthSource{})
+	embClient := embeddings.EmbedderClientFunc(func(ctx context.Context, texts []string) ([][]float32, error) {
+		return prov.GenerateEmbeddingsBatch(ctx, model, texts)
+	})
+	lcEmbedder, _ := embeddings.NewEmbedder(embClient, embeddings.WithBatchSize(32), embeddings.WithStripNewLines(true))
+	return NewLangChainEmbedder(lcEmbedder, "ollama/"+model, 768)
+}
 
 // --- OpenAI Embedder ---
 
-type OpenAIEmbedder struct {
-	baseURL   string
-	apiKey    string
-	model     string
-	dimension int
-	client    *http.Client
-}
-
-// NewOpenAIEmbedder creates an OpenAI-compatible embedder.
-func NewOpenAIEmbedder(baseURL, apiKey, model string, dimension int) *OpenAIEmbedder {
+// NewOpenAIEmbedder creates an OpenAI-compatible embedder powered by langchaingo/embeddings.
+func NewOpenAIEmbedder(baseURL, apiKey, model string, dimension int) Embedder {
 	if dimension <= 0 {
 		dimension = 1536
 	}
-	return &OpenAIEmbedder{
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		apiKey:    apiKey,
-		model:     model,
-		dimension: dimension,
-		client:    &http.Client{Timeout: 60 * time.Second},
-	}
-}
+	client := &http.Client{Timeout: 60 * time.Second}
+	cleanBaseURL := strings.TrimRight(baseURL, "/")
 
-func (e *OpenAIEmbedder) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
-	embs, err := e.EmbedDocuments(ctx, []string{text})
-	if err != nil {
-		return nil, err
-	}
-	if len(embs) == 0 {
-		return nil, fmt.Errorf("empty embedding response from OpenAI")
-	}
-	return embs[0], nil
-}
-
-func (e *OpenAIEmbedder) EmbedDocuments(ctx context.Context, texts []string) ([][]float32, error) {
-	type embRequest struct {
-		Model string   `json:"model"`
-		Input []string `json:"input"`
-	}
-	type embData struct {
-		Index     int       `json:"index"`
-		Embedding []float32 `json:"embedding"`
-	}
-	type embResponse struct {
-		Data []embData `json:"data"`
-	}
-
-	payload, err := json.Marshal(embRequest{Model: e.model, Input: texts})
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.baseURL+"/embeddings", bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if e.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-	}
-
-	resp, err := e.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openai embeddings API returned HTTP %d", resp.StatusCode)
-	}
-
-	var res embResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return nil, err
-	}
-
-	result := make([][]float32, len(texts))
-	for _, item := range res.Data {
-		if item.Index >= 0 && item.Index < len(result) {
-			result[item.Index] = item.Embedding
+	embClient := embeddings.EmbedderClientFunc(func(ctx context.Context, texts []string) ([][]float32, error) {
+		type embRequest struct {
+			Model string   `json:"model"`
+			Input []string `json:"input"`
 		}
-	}
-	return result, nil
-}
+		type embData struct {
+			Index     int       `json:"index"`
+			Embedding []float32 `json:"embedding"`
+		}
+		type embResponse struct {
+			Data []embData `json:"data"`
+		}
 
-func (e *OpenAIEmbedder) Dimension() int   { return e.dimension }
-func (e *OpenAIEmbedder) ModelName() string { return "openai/" + e.model }
+		payload, err := json.Marshal(embRequest{Model: model, Input: texts})
+		if err != nil {
+			return nil, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, cleanBaseURL+"/embeddings", bytes.NewReader(payload))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("openai embeddings API returned HTTP %d", resp.StatusCode)
+		}
+
+		var res embResponse
+		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+			return nil, err
+		}
+
+		result := make([][]float32, len(texts))
+		for _, item := range res.Data {
+			if item.Index >= 0 && item.Index < len(result) {
+				result[item.Index] = item.Embedding
+			}
+		}
+		return result, nil
+	})
+
+	lcEmbedder, _ := embeddings.NewEmbedder(embClient, embeddings.WithBatchSize(64), embeddings.WithStripNewLines(true))
+	return NewLangChainEmbedder(lcEmbedder, "openai/"+model, dimension)
+}
 
 // --- Local BM25 / Term-Frequency Embedder (Zero Dependencies) ---
 

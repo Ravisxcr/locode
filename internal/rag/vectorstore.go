@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -9,7 +10,14 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/tmc/langchaingo/embeddings"
+	"github.com/tmc/langchaingo/schema"
+	"github.com/tmc/langchaingo/vectorstores"
 )
+
+// Ensure VectorStore satisfies the langchaingo vectorstores.VectorStore interface.
+var _ vectorstores.VectorStore = (*VectorStore)(nil)
 
 // VectorDoc combines a CodeChunk with its dense vector embedding.
 type VectorDoc struct {
@@ -26,7 +34,8 @@ type StoreStats struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// VectorStore holds code chunks and embeddings in memory with disk persistence.
+// VectorStore holds code chunks and embeddings in memory with disk persistence,
+// implementing github.com/tmc/langchaingo/vectorstores.VectorStore.
 type VectorStore struct {
 	mu         sync.RWMutex
 	Docs       []VectorDoc       `json:"docs"`
@@ -34,6 +43,8 @@ type VectorStore struct {
 	ModelName  string            `json:"model_name"`
 	Dimension  int               `json:"dimension"`
 	UpdatedAt  time.Time         `json:"updated_at"`
+
+	embedder embeddings.Embedder
 }
 
 // NewVectorStore creates an empty VectorStore.
@@ -45,6 +56,13 @@ func NewVectorStore(modelName string, dimension int) *VectorStore {
 		Dimension:  dimension,
 		UpdatedAt:  time.Now(),
 	}
+}
+
+// SetEmbedder sets the default embedder for the VectorStore.
+func (vs *VectorStore) SetEmbedder(emb embeddings.Embedder) {
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+	vs.embedder = emb
 }
 
 // CosineSimilarity computes the cosine similarity between two float32 vectors.
@@ -67,8 +85,8 @@ func CosineSimilarity(a, b []float32) float32 {
 	return dot / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
 }
 
-// AddDocuments adds a list of chunks and their corresponding embeddings to the store.
-func (vs *VectorStore) AddDocuments(chunks []CodeChunk, embeddings [][]float32) error {
+// AddChunks adds a list of chunks and their corresponding precomputed embeddings to the store.
+func (vs *VectorStore) AddChunks(chunks []CodeChunk, embeddings [][]float32) error {
 	if len(chunks) != len(embeddings) {
 		return fmt.Errorf("chunk count (%d) does not match embedding count (%d)", len(chunks), len(embeddings))
 	}
@@ -84,6 +102,92 @@ func (vs *VectorStore) AddDocuments(chunks []CodeChunk, embeddings [][]float32) 
 	}
 	vs.UpdatedAt = time.Now()
 	return nil
+}
+
+// AddDocuments adds a list of schema.Document items to the store, implementing langchaingo vectorstores.VectorStore.
+func (vs *VectorStore) AddDocuments(ctx context.Context, docs []schema.Document, options ...vectorstores.Option) ([]string, error) {
+	opts := vectorstores.Options{}
+	for _, opt := range options {
+		opt(&opts)
+	}
+
+	emb := opts.Embedder
+	if emb == nil {
+		emb = vs.embedder
+	}
+
+	texts := make([]string, len(docs))
+	for i, doc := range docs {
+		texts[i] = doc.PageContent
+	}
+
+	var vectors [][]float32
+	if emb != nil {
+		var err error
+		vectors, err = emb.EmbedDocuments(ctx, texts)
+		if err != nil {
+			return nil, fmt.Errorf("embedding documents: %w", err)
+		}
+	}
+
+	vs.mu.Lock()
+	defer vs.mu.Unlock()
+
+	ids := make([]string, len(docs))
+	for i, doc := range docs {
+		chunk := DocumentToChunk(doc)
+		if chunk.ID == "" {
+			chunk.ID = fmt.Sprintf("doc_%d_%d", time.Now().UnixNano(), i)
+		}
+		ids[i] = chunk.ID
+
+		var vec []float32
+		if i < len(vectors) {
+			vec = vectors[i]
+		}
+
+		vs.Docs = append(vs.Docs, VectorDoc{
+			Chunk:     chunk,
+			Embedding: vec,
+		})
+	}
+	vs.UpdatedAt = time.Now()
+	return ids, nil
+}
+
+// SimilaritySearch retrieves the top matching documents for a query text, implementing langchaingo vectorstores.VectorStore.
+func (vs *VectorStore) SimilaritySearch(ctx context.Context, query string, numDocuments int, options ...vectorstores.Option) ([]schema.Document, error) {
+	opts := vectorstores.Options{}
+	for _, opt := range options {
+		opt(&opts)
+	}
+
+	emb := opts.Embedder
+	if emb == nil {
+		emb = vs.embedder
+	}
+	if emb == nil {
+		return nil, fmt.Errorf("no embedder configured for SimilaritySearch")
+	}
+
+	queryVec, err := emb.EmbedQuery(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("embedding query: %w", err)
+	}
+
+	results := vs.Search(queryVec, numDocuments, opts.ScoreThreshold)
+	docs := make([]schema.Document, len(results))
+	for i, res := range results {
+		doc := ChunkToDocument(res.Chunk)
+		doc.Score = res.Score
+		docs[i] = doc
+	}
+	return docs, nil
+}
+
+// ToRetriever returns a langchaingo Retriever wrapping this VectorStore.
+func (vs *VectorStore) ToRetriever(numDocuments int, options ...vectorstores.Option) vectorstores.Retriever {
+	return vectorstores.ToRetriever(vs, numDocuments, options...)
 }
 
 // SetFileHash records the SHA256 checksum for a file.
@@ -236,3 +340,61 @@ func (vs *VectorStore) Load(targetPath string) error {
 	return nil
 }
 
+// ChunkToDocument converts an internal CodeChunk to a langchaingo schema.Document.
+func ChunkToDocument(c CodeChunk) schema.Document {
+	return schema.Document{
+		PageContent: c.Content,
+		Metadata: map[string]any{
+			"id":          c.ID,
+			"file_path":   c.FilePath,
+			"language":    c.Language,
+			"start_line":  c.StartLine,
+			"end_line":    c.EndLine,
+			"token_count": c.TokenCount,
+			"chunk_index": c.ChunkIndex,
+			"checksum":    c.Checksum,
+		},
+	}
+}
+
+// DocumentToChunk converts a langchaingo schema.Document back to an internal CodeChunk.
+func DocumentToChunk(doc schema.Document) CodeChunk {
+	c := CodeChunk{
+		Content: doc.PageContent,
+	}
+	if doc.Metadata != nil {
+		if v, ok := doc.Metadata["id"].(string); ok {
+			c.ID = v
+		}
+		if v, ok := doc.Metadata["file_path"].(string); ok {
+			c.FilePath = v
+		}
+		if v, ok := doc.Metadata["language"].(string); ok {
+			c.Language = v
+		}
+		if v, ok := doc.Metadata["start_line"].(int); ok {
+			c.StartLine = v
+		} else if v, ok := doc.Metadata["start_line"].(float64); ok {
+			c.StartLine = int(v)
+		}
+		if v, ok := doc.Metadata["end_line"].(int); ok {
+			c.EndLine = v
+		} else if v, ok := doc.Metadata["end_line"].(float64); ok {
+			c.EndLine = int(v)
+		}
+		if v, ok := doc.Metadata["token_count"].(int); ok {
+			c.TokenCount = v
+		} else if v, ok := doc.Metadata["token_count"].(float64); ok {
+			c.TokenCount = int(v)
+		}
+		if v, ok := doc.Metadata["chunk_index"].(int); ok {
+			c.ChunkIndex = v
+		} else if v, ok := doc.Metadata["chunk_index"].(float64); ok {
+			c.ChunkIndex = int(v)
+		}
+		if v, ok := doc.Metadata["checksum"].(string); ok {
+			c.Checksum = v
+		}
+	}
+	return c
+}

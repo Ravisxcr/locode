@@ -242,7 +242,7 @@ func (idx *Indexer) IndexWorkspace(ctx context.Context, opts IndexOptions) (*Ind
 			return nil, fmt.Errorf("embedding file %s: %w", relPath, err)
 		}
 
-		if err := idx.store.AddDocuments(chunks, embs); err != nil {
+		if err := idx.store.AddChunks(chunks, embs); err != nil {
 			return nil, fmt.Errorf("adding chunks to vector store: %w", err)
 		}
 

@@ -18,8 +18,9 @@ gocode/
 ├── docs/                        # Documentation
 ├── internal/
 │   ├── agent/                   # ConversationRuntime, ToolExecutor, permissions, hooks, usage
-│   ├── apiclient/               # Provider interface, Anthropic/OpenAI/Gemini/xAI providers, SSE
+│   ├── apiclient/               # Provider interface, native + LangChain model adapter
 │   ├── apitypes/                # Shared API types, errors, retry config
+│   ├── rag/                     # Vector RAG: textsplitter, embeddings, vectorstore, retriever
 │   ├── repl/                    # Interactive REPL, streaming display, slash commands
 │   ├── models/                  # Core types: ToolDefinition, InputSchema, UsageSummary
 │   ├── permissions/             # Tool access control
@@ -115,6 +116,7 @@ graph TB
 | **`(T, error)` everywhere** | Every fallible operation returns an error. No panics |
 | **Atomic file writes** | Session persistence uses temp-file + rename. Zero corruption |
 | **Kind-discriminated structs** | Go equivalent of Rust enums. Simple JSON serialization |
+| **`tmc/langchaingo` integration** | Language-aware code splitting (AST boundaries), standard embedding pipelines, and pluggable model adapters |
 
 ---
 

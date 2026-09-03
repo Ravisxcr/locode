@@ -262,6 +262,9 @@ func (p *OllamaProvider) SendMessage(ctx context.Context, req apitypes.MessageRe
 		return nil
 	})
 	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil, fmt.Errorf("ollama sdk chat error (%s): %w\nHint: run 'ollama pull %s' on %s or check installed models with './bin/gocode ollama list --host %s'", p.Host, err, chatReq.Model, p.Host, p.Host)
+		}
 		return nil, fmt.Errorf("ollama sdk chat error (%s): %w", p.Host, err)
 	}
 
@@ -369,11 +372,15 @@ func (p *OllamaProvider) StreamMessage(ctx context.Context, req apitypes.Message
 		})
 
 		if err != nil {
+			msg := fmt.Sprintf("Error from Ollama (%s): %v", p.Host, err)
+			if strings.Contains(strings.ToLower(err.Error()), "not found") {
+				msg += fmt.Sprintf("\n\nHint: Model %q is not installed on %s.\nTo pull it, run on the Ollama host:\n  ollama pull %s\nOr check installed models with:\n  ./bin/gocode ollama list --host %s", chatReq.Model, p.Host, chatReq.Model, p.Host)
+			}
 			eventCh <- apitypes.StreamEvent{
 				Kind: "error",
 				BlockDelta: &apitypes.ContentBlockDelta{
 					Kind: "text_delta",
-					Text: fmt.Sprintf("Error from Ollama (%s): %v", p.Host, err),
+					Text: msg,
 				},
 			}
 			eventCh <- apitypes.StreamEvent{Kind: "message_stop"}

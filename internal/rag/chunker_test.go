@@ -88,3 +88,63 @@ func TestCodeChunker_LargeFileSplitting(t *testing.T) {
 	}
 }
 
+func TestCodeChunker_LanguageSeparators(t *testing.T) {
+	opts := ChunkOptions{
+		MaxChunkTokens: 30,
+		OverlapLines:   1,
+		MinChunkTokens: 5,
+	}
+	chunker := NewCodeChunker(opts)
+
+	goCode := `package mathutils
+
+func Add(a, b int) int {
+	return a + b
+}
+
+func Subtract(a, b int) int {
+	return a - b
+}
+
+type Calculator struct {
+	Total int
+}
+`
+	chunks := chunker.ChunkFile("math.go", goCode)
+	if len(chunks) < 2 {
+		t.Fatalf("expected at least 2 chunks for Go code split, got %d", len(chunks))
+	}
+	for _, ch := range chunks {
+		if ch.Language != "go" {
+			t.Errorf("expected language go, got %s", ch.Language)
+		}
+	}
+}
+
+func TestCodeChunker_Markdown(t *testing.T) {
+	opts := ChunkOptions{
+		MaxChunkTokens: 25,
+		OverlapLines:   1,
+		MinChunkTokens: 5,
+	}
+	chunker := NewCodeChunker(opts)
+
+	mdContent := `# Title
+
+## Section 1
+This is the first section with documentation details.
+
+## Section 2
+This is the second section explaining architectural principles and tradeoffs.
+`
+	chunks := chunker.ChunkFile("README.md", mdContent)
+	if len(chunks) < 2 {
+		t.Fatalf("expected at least 2 chunks for markdown, got %d", len(chunks))
+	}
+	for _, ch := range chunks {
+		if ch.Language != "markdown" {
+			t.Errorf("expected language markdown, got %s", ch.Language)
+		}
+	}
+}
+

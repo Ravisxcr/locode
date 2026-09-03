@@ -42,7 +42,7 @@ func TestRetriever_HybridSearch(t *testing.T) {
 		chunks[2].Content,
 	})
 
-	_ = store.AddDocuments(chunks, embs)
+	_ = store.AddChunks(chunks, embs)
 
 	retriever := NewRetriever(store, embedder)
 
@@ -62,6 +62,18 @@ func TestRetriever_HybridSearch(t *testing.T) {
 	formatted := FormatContext(results)
 	if formatted == "" {
 		t.Errorf("FormatContext returned empty string")
+	}
+
+	// Test schema.Retriever implementation
+	docs, err := retriever.GetRelevantDocuments(context.Background(), "validate jwt token")
+	if err != nil {
+		t.Fatalf("GetRelevantDocuments failed: %v", err)
+	}
+	if len(docs) == 0 {
+		t.Fatalf("expected non-empty schema.Documents")
+	}
+	if docs[0].Metadata["file_path"] != "auth.go" {
+		t.Errorf("expected top doc to be auth.go, got %v", docs[0].Metadata["file_path"])
 	}
 }
 

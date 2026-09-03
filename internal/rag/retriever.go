@@ -6,7 +6,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tmc/langchaingo/schema"
 )
+
+// Ensure Retriever satisfies the langchaingo schema.Retriever interface.
+var _ schema.Retriever = (*Retriever)(nil)
 
 // SearchResult represents a retrieved chunk with similarity scoring.
 type SearchResult struct {
@@ -28,6 +33,21 @@ func NewRetriever(store *VectorStore, embedder Embedder) *Retriever {
 		store:    store,
 		embedder: embedder,
 	}
+}
+
+// GetRelevantDocuments satisfies the langchaingo schema.Retriever interface.
+func (r *Retriever) GetRelevantDocuments(ctx context.Context, query string) ([]schema.Document, error) {
+	results, err := r.Retrieve(ctx, query, 5, "")
+	if err != nil {
+		return nil, err
+	}
+	docs := make([]schema.Document, len(results))
+	for i, res := range results {
+		d := ChunkToDocument(res.Chunk)
+		d.Score = float32(res.Score)
+		docs[i] = d
+	}
+	return docs, nil
 }
 
 // Retrieve queries the vector store and sparse lexical index, combining them with Reciprocal Rank Fusion.

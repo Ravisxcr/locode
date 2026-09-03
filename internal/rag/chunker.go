@@ -4,9 +4,116 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/tmc/langchaingo/textsplitter"
 )
+
+// Language-specific separator hierarchies for AST/boundary-aware splitting.
+var languageSeparators = map[string][]string{
+	"go": {
+		"\nfunc ",
+		"\ntype ",
+		"\nvar ",
+		"\nconst ",
+		"\n// ",
+		"\n\n",
+		"\n",
+		" ",
+		"",
+	},
+	"python": {
+		"\ndef ",
+		"\nclass ",
+		"\nasync def ",
+		"\n# ",
+		"\n\n",
+		"\n",
+		" ",
+		"",
+	},
+	"typescript": {
+		"\nexport function ",
+		"\nexport class ",
+		"\nexport interface ",
+		"\nexport type ",
+		"\nexport const ",
+		"\nfunction ",
+		"\nclass ",
+		"\ninterface ",
+		"\ntype ",
+		"\n// ",
+		"\n\n",
+		"\n",
+		" ",
+		"",
+	},
+	"javascript": {
+		"\nexport function ",
+		"\nexport class ",
+		"\nexport const ",
+		"\nfunction ",
+		"\nclass ",
+		"\nconst ",
+		"\nlet ",
+		"\nvar ",
+		"\n// ",
+		"\n\n",
+		"\n",
+		" ",
+		"",
+	},
+	"rust": {
+		"\npub fn ",
+		"\nfn ",
+		"\npub struct ",
+		"\nstruct ",
+		"\npub enum ",
+		"\nenum ",
+		"\nimpl ",
+		"\npub trait ",
+		"\ntrait ",
+		"\n// ",
+		"\n\n",
+		"\n",
+		" ",
+		"",
+	},
+	"java": {
+		"\npublic class ",
+		"\nclass ",
+		"\npublic interface ",
+		"\ninterface ",
+		"\npublic ",
+		"\nprivate ",
+		"\nprotected ",
+		"\n// ",
+		"\n\n",
+		"\n",
+		" ",
+		"",
+	},
+	"cpp": {
+		"\nclass ",
+		"\nstruct ",
+		"\nnamespace ",
+		"\n// ",
+		"\n\n",
+		"\n",
+		" ",
+		"",
+	},
+	"c": {
+		"\nstruct ",
+		"\ntypedef ",
+		"\n// ",
+		"\n/*",
+		"\n\n",
+		"\n",
+		" ",
+		"",
+	},
+}
 
 // CodeChunk represents a chunk of indexed code with location metadata.
 type CodeChunk struct {
@@ -120,10 +227,7 @@ func EstimateTokens(text string) int {
 	return chars
 }
 
-// topLevelDeclRegex matches top-level functions, methods, classes, and types in common languages.
-var topLevelDeclRegex = regexp.MustCompile(`(?m)^(?:func\s+|type\s+|def\s+|class\s+|export\s+class\s+|export\s+function\s+|export\s+interface\s+|interface\s+|pub\s+fn\s+|fn\s+|async\s+def\s+|public\s+class\s+|struct\s+|enum\s+|#+\s+)`)
-
-// ChunkFile splits a file content into a slice of CodeChunk.
+// ChunkFile splits a file content into a slice of CodeChunk using langchaingo's textsplitter.
 func (c *CodeChunker) ChunkFile(filePath, content string) []CodeChunk {
 	trimmed := strings.TrimRight(content, "\r\n")
 	if strings.TrimSpace(trimmed) == "" {
@@ -138,7 +242,7 @@ func (c *CodeChunker) ChunkFile(filePath, content string) []CodeChunk {
 	lang := DetectLanguage(filePath)
 	totalTokens := EstimateTokens(content)
 
-	// If entire file fits in one chunk, return it as single chunk
+	// If entire file fits in one chunk, return it as a single chunk
 	if totalTokens <= c.opts.MaxChunkTokens {
 		checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 		return []CodeChunk{
@@ -156,119 +260,95 @@ func (c *CodeChunker) ChunkFile(filePath, content string) []CodeChunk {
 		}
 	}
 
-	// Semantic chunking: find logical block boundaries (function declarations, headers, blank line separators)
-	var boundaryLines []int
-	boundaryLines = append(boundaryLines, 0) // start of file
+	// Approximate character limits based on token limits (~4 chars per token)
+	chunkCharSize := c.opts.MaxChunkTokens * 4
+	overlapCharSize := c.opts.OverlapLines * 40
 
-	for i, line := range lines {
-		if i == 0 {
-			continue
-		}
-		if topLevelDeclRegex.MatchString(line) {
-			boundaryLines = append(boundaryLines, i)
+	var splitter textsplitter.TextSplitter
+	if lang == "markdown" {
+		splitter = textsplitter.NewMarkdownTextSplitter(
+			textsplitter.WithChunkSize(chunkCharSize),
+			textsplitter.WithChunkOverlap(overlapCharSize),
+		)
+	} else if seps, ok := languageSeparators[lang]; ok {
+		splitter = textsplitter.NewRecursiveCharacter(
+			textsplitter.WithSeparators(seps),
+			textsplitter.WithChunkSize(chunkCharSize),
+			textsplitter.WithChunkOverlap(overlapCharSize),
+			textsplitter.WithKeepSeparator(true),
+		)
+	} else {
+		splitter = textsplitter.NewRecursiveCharacter(
+			textsplitter.WithChunkSize(chunkCharSize),
+			textsplitter.WithChunkOverlap(overlapCharSize),
+			textsplitter.WithKeepSeparator(true),
+		)
+	}
+
+	pieces, err := splitter.SplitText(content)
+	if err != nil || len(pieces) == 0 {
+		checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+		return []CodeChunk{
+			{
+				ID:         fmt.Sprintf("%s#L1-L%d", filePath, len(lines)),
+				FilePath:   filePath,
+				Language:   lang,
+				Content:    content,
+				StartLine:  1,
+				EndLine:    len(lines),
+				TokenCount: totalTokens,
+				ChunkIndex: 0,
+				Checksum:   checksum,
+			},
 		}
 	}
-	boundaryLines = append(boundaryLines, len(lines))
 
 	var chunks []CodeChunk
-	currentStartLine := 0
-	var currentChunkLines []string
+	searchPos := 0
 
-	for bIdx := 0; bIdx < len(boundaryLines)-1; bIdx++ {
-		start := boundaryLines[bIdx]
-		end := boundaryLines[bIdx+1]
-
-		sectionLines := lines[start:end]
-		sectionTokens := EstimateTokens(strings.Join(sectionLines, "\n"))
-
-		// If this section alone is larger than MaxChunkTokens, split line-by-line with overlap
-		if sectionTokens > c.opts.MaxChunkTokens {
-			// Flush current accumulator first if non-empty
-			if len(currentChunkLines) > 0 {
-				chunks = append(chunks, c.makeChunk(filePath, lang, currentStartLine+1, currentChunkLines, len(chunks)))
-				currentChunkLines = nil
-			}
-
-			// Sub-split large section
-			subChunks := c.splitLinesWithOverlap(filePath, lang, start+1, sectionLines, len(chunks))
-			chunks = append(chunks, subChunks...)
-			currentStartLine = end
+	for _, piece := range pieces {
+		pieceTrimmed := strings.TrimSpace(piece)
+		if pieceTrimmed == "" {
+			continue
+		}
+		if EstimateTokens(pieceTrimmed) < c.opts.MinChunkTokens && len(pieces) > 1 && len(chunks) > 0 {
 			continue
 		}
 
-		// Check if accumulating this section exceeds limit
-		accTokens := EstimateTokens(strings.Join(currentChunkLines, "\n")) + sectionTokens
-		if accTokens > c.opts.MaxChunkTokens && len(currentChunkLines) > 0 {
-			chunks = append(chunks, c.makeChunk(filePath, lang, currentStartLine+1, currentChunkLines, len(chunks)))
-
-			// Start new accumulator with overlap from previous chunk
-			overlapStart := max(0, len(currentChunkLines)-c.opts.OverlapLines)
-			overlap := currentChunkLines[overlapStart:]
-			currentStartLine = start - len(overlap)
-			currentChunkLines = append(append([]string{}, overlap...), sectionLines...)
+		// Locate the piece in content to determine exact line numbers
+		idx := strings.Index(content[searchPos:], piece)
+		var startLine int
+		if idx != -1 {
+			actualPos := searchPos + idx
+			startLine = strings.Count(content[:actualPos], "\n") + 1
+			searchPos = actualPos + len(piece)/2
 		} else {
-			if len(currentChunkLines) == 0 {
-				currentStartLine = start
+			if len(chunks) > 0 {
+				startLine = chunks[len(chunks)-1].EndLine + 1
+			} else {
+				startLine = 1
 			}
-			currentChunkLines = append(currentChunkLines, sectionLines...)
 		}
-	}
 
-	// Flush remaining accumulated lines
-	if len(currentChunkLines) > 0 {
-		chunks = append(chunks, c.makeChunk(filePath, lang, currentStartLine+1, currentChunkLines, len(chunks)))
+		lineCount := strings.Count(piece, "\n")
+		endLine := startLine + lineCount
+		if endLine < startLine {
+			endLine = startLine
+		}
+
+		checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(piece)))
+		chunks = append(chunks, CodeChunk{
+			ID:         fmt.Sprintf("%s#L%d-L%d", filePath, startLine, endLine),
+			FilePath:   filePath,
+			Language:   lang,
+			Content:    piece,
+			StartLine:  startLine,
+			EndLine:    endLine,
+			TokenCount: EstimateTokens(piece),
+			ChunkIndex: len(chunks),
+			Checksum:   checksum,
+		})
 	}
 
 	return chunks
-}
-
-func (c *CodeChunker) splitLinesWithOverlap(filePath, lang string, baseStartLine int, lines []string, startingIndex int) []CodeChunk {
-	var chunks []CodeChunk
-	var currentLines []string
-	startLine := baseStartLine
-
-	for i, line := range lines {
-		currentLines = append(currentLines, line)
-		tokens := EstimateTokens(strings.Join(currentLines, "\n"))
-
-		if tokens >= c.opts.MaxChunkTokens {
-			chunks = append(chunks, c.makeChunk(filePath, lang, startLine, currentLines, startingIndex+len(chunks)))
-
-			// Keep overlap
-			overlapCount := min(c.opts.OverlapLines, len(currentLines))
-			overlap := currentLines[len(currentLines)-overlapCount:]
-			startLine = baseStartLine + i - overlapCount + 1
-			currentLines = append([]string{}, overlap...)
-		}
-	}
-
-	if len(currentLines) > 0 {
-		tokens := EstimateTokens(strings.Join(currentLines, "\n"))
-		if tokens >= c.opts.MinChunkTokens || len(chunks) == 0 {
-			chunks = append(chunks, c.makeChunk(filePath, lang, startLine, currentLines, startingIndex+len(chunks)))
-		}
-	}
-
-	return chunks
-}
-
-func (c *CodeChunker) makeChunk(filePath, lang string, startLine int, lines []string, chunkIndex int) CodeChunk {
-	content := strings.Join(lines, "\n")
-	endLine := startLine + len(lines) - 1
-	if endLine < startLine {
-		endLine = startLine
-	}
-	checksum := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
-
-	return CodeChunk{
-		ID:         fmt.Sprintf("%s#L%d-L%d", filePath, startLine, endLine),
-		FilePath:   filePath,
-		Language:   lang,
-		Content:    content,
-		StartLine:  startLine,
-		EndLine:    endLine,
-		TokenCount: EstimateTokens(content),
-		ChunkIndex: chunkIndex,
-		Checksum:   checksum,
-	}
 }
