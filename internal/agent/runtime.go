@@ -695,6 +695,25 @@ func (r *ConversationRuntime) RestoreSession(messages []apitypes.InputMessage) {
 	r.session = messages
 }
 
+// GetSystemPrompt returns the active system prompt.
+func (r *ConversationRuntime) GetSystemPrompt() string {
+	return r.systemPrompt
+}
+
+// SetSystemPrompt updates the active system prompt.
+func (r *ConversationRuntime) SetSystemPrompt(prompt string) {
+	r.systemPrompt = prompt
+}
+
+// AppendSystemPrompt appends text to the active system prompt.
+func (r *ConversationRuntime) AppendSystemPrompt(extra string) {
+	if r.systemPrompt != "" {
+		r.systemPrompt += "\n\n" + extra
+	} else {
+		r.systemPrompt = extra
+	}
+}
+
 func appendJSON(existing json.RawMessage, partial string) json.RawMessage {
 	if len(existing) == 0 || string(existing) == "{}" {
 		return json.RawMessage(partial)

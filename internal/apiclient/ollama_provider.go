@@ -149,10 +149,6 @@ func (p *OllamaProvider) buildChatRequest(req apitypes.MessageRequest, stream bo
 		for _, b := range m.Content {
 			switch b.Kind {
 			case "text":
-				msgs = append(msgs, api.Message{
-					Role:    "user",
-					Content: b.Text,
-				})
 			case "tool_result":
 				msgs = append(msgs, api.Message{
 					Role:    "tool",
@@ -178,34 +174,34 @@ func (p *OllamaProvider) buildChatRequest(req apitypes.MessageRequest, stream bo
 
 		if schema != nil {
 			if r, ok := schema["required"].([]interface{}); ok {
-				for _, reqField := range r {
-					if s, ok := reqField.(string); ok {
-						required = append(required, s)
+				for _, reqItem := range r {
+					if str, ok := reqItem.(string); ok {
+						required = append(required, str)
 					}
 				}
 			}
-			if pMap, ok := schema["properties"].(map[string]interface{}); ok {
-				for k, v := range pMap {
-					if vm, ok := v.(map[string]interface{}); ok {
-						tp := struct {
-							Type        string   `json:"type"`
-							Description string   `json:"description"`
-							Enum        []string `json:"enum,omitempty"`
-						}{}
-						if tType, ok := vm["type"].(string); ok {
-							tp.Type = tType
-						}
-						if tDesc, ok := vm["description"].(string); ok {
-							tp.Description = tDesc
-						}
-						if enumList, ok := vm["enum"].([]interface{}); ok {
-							for _, e := range enumList {
-								if es, ok := e.(string); ok {
-									tp.Enum = append(tp.Enum, es)
+			if p, ok := schema["properties"].(map[string]interface{}); ok {
+				for k, v := range p {
+					if propMap, ok := v.(map[string]interface{}); ok {
+						var enumValues []string
+						if enumArr, ok := propMap["enum"].([]interface{}); ok {
+							for _, e := range enumArr {
+								if eStr, ok := e.(string); ok {
+									enumValues = append(enumValues, eStr)
 								}
 							}
 						}
-						props[k] = tp
+						propType, _ := propMap["type"].(string)
+						propDesc, _ := propMap["description"].(string)
+						props[k] = struct {
+							Type        string   `json:"type"`
+							Description string   `json:"description"`
+							Enum        []string `json:"enum,omitempty"`
+						}{
+							Type:        propType,
+							Description: propDesc,
+							Enum:        enumValues,
+						}
 					}
 				}
 			}

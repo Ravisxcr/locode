@@ -211,5 +211,20 @@
         "all": { "type": "boolean", "description": "Whether to stage unstaged changes before committing (default: true)" }
       }
     }
+  },
+  {
+    "name": "MemoryTool",
+    "responsibility": "persist and recall project/user memories, conventions, and facts across sessions",
+    "description": "Store, recall, and search persistent project, user, and team memories (facts, conventions, preferences, past decisions) that persist across sessions in .gocode/memory/.",
+    "source_hint": "memory/store",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "action": { "type": "string", "enum": ["store", "recall", "list"], "description": "Memory operation to perform (default: recall)" },
+        "content": { "type": "string", "description": "The fact, convention, or instruction to remember (required for action=store)" },
+        "query": { "type": "string", "description": "Keywords or topic to search for (for action=recall)" },
+        "scope": { "type": "string", "enum": ["project", "user", "team"], "description": "Scope for storing memory (default: project)" }
+      }
+    }
   }
 ]

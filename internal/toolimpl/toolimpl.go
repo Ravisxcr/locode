@@ -17,6 +17,7 @@ import (
 
 	"github.com/Ravisxcr/gocode-rag/internal/apiclient"
 	"github.com/Ravisxcr/gocode-rag/internal/gitcommit"
+	"github.com/Ravisxcr/gocode-rag/internal/memdir"
 	"github.com/Ravisxcr/gocode-rag/internal/pdf"
 )
 
@@ -121,6 +122,12 @@ func NewRegistry() *Registry {
 	r.executors["prompt"] = promptTool
 	r.executors["gocode_prompt"] = promptTool
 	r.executors["prompttool"] = promptTool
+
+	memoryTool := &MemoryTool{store: memdir.NewStore()}
+	r.executors["memorytool"] = memoryTool
+	r.executors["memory_tool"] = memoryTool
+	r.executors["memory"] = memoryTool
+	r.executors["remember"] = memoryTool
 
 	return r
 }
@@ -1178,5 +1185,88 @@ func (t *GitCommitTool) Execute(params map[string]interface{}) ToolResult {
 	return ToolResult{
 		Success: true,
 		Output:  fmt.Sprintf("✓ Successfully committed [%s]: %s\n\nChanges:\n%s", sha, strings.Split(msg, "\n")[0], stat),
+	}
+}
+
+// MemoryTool allows the agent to store, recall, and search persistent memories across sessions.
+type MemoryTool struct {
+	store *memdir.Store
+}
+
+func (t *MemoryTool) Execute(params map[string]interface{}) ToolResult {
+	if t.store == nil {
+		t.store = memdir.NewStore()
+	}
+
+	action, _ := params["action"].(string)
+	if action == "" {
+		action = "recall"
+	}
+
+	switch strings.ToLower(action) {
+	case "store", "save", "set", "remember":
+		content, _ := params["content"].(string)
+		if content == "" {
+			return ToolResult{Success: false, Error: "content is required for storing memory"}
+		}
+		scopeStr, _ := params["scope"].(string)
+		scope := memdir.ScopeProject
+		switch strings.ToLower(scopeStr) {
+		case "user":
+			scope = memdir.ScopeUser
+		case "team":
+			scope = memdir.ScopeTeam
+		}
+
+		entry := memdir.MemoryEntry{
+			ID:         fmt.Sprintf("mem-%d", time.Now().UnixNano()),
+			Content:    content,
+			Scope:      scope,
+			CreatedAt:  time.Now(),
+			LastAccess: time.Now(),
+			Relevance:  1.0,
+		}
+		if err := t.store.Save(entry); err != nil {
+			return ToolResult{Success: false, Error: fmt.Sprintf("failed to save memory: %v", err)}
+		}
+		return ToolResult{Success: true, Output: fmt.Sprintf("✓ Memory stored successfully [%s]: %s", scope, content)}
+
+	case "recall", "search", "get":
+		query, _ := params["query"].(string)
+		limit := 5
+		if l, ok := params["limit"].(float64); ok && l > 0 {
+			limit = int(l)
+		}
+		entries, err := t.store.FindRelevant(query, limit)
+		if err != nil {
+			return ToolResult{Success: false, Error: fmt.Sprintf("failed to recall memories: %v", err)}
+		}
+		if len(entries) == 0 {
+			return ToolResult{Success: true, Output: "No relevant memories found."}
+		}
+		var sb strings.Builder
+		sb.WriteString("Found memories:\n")
+		for _, e := range entries {
+			sb.WriteString(fmt.Sprintf("- [%s] %s\n", e.Scope, e.Content))
+		}
+		return ToolResult{Success: true, Output: sb.String()}
+
+	case "list":
+		entries, err := t.store.FindRelevant("", 20)
+		if err != nil {
+			return ToolResult{Success: false, Error: fmt.Sprintf("failed to list memories: %v", err)}
+		}
+		if len(entries) == 0 {
+			return ToolResult{Success: true, Output: "No memories stored."}
+		}
+		var sb strings.Builder
+		sb.WriteString("Stored memories:\n")
+		for _, e := range entries {
+			sb.WriteString(fmt.Sprintf("- [%s] %s\n", e.Scope, e.Content))
+		}
+		return ToolResult{Success: true, Output: sb.String()}
+
+	default:
+		return ToolResult{Success: false, Error: fmt.Sprintf("unknown memory action %q, expected 'store', 'recall', or 'list'", action)}
 	}
 }

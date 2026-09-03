@@ -23,6 +23,7 @@ import (
 	"github.com/Ravisxcr/gocode-rag/internal/dream"
 	"github.com/Ravisxcr/gocode-rag/internal/gitcommit"
 	"github.com/Ravisxcr/gocode-rag/internal/initdeep"
+	"github.com/Ravisxcr/gocode-rag/internal/memdir"
 	"github.com/Ravisxcr/gocode-rag/internal/memory"
 	"github.com/Ravisxcr/gocode-rag/internal/outputstyles"
 	"github.com/Ravisxcr/gocode-rag/internal/rag"
@@ -398,19 +399,36 @@ func (r *REPL) Run(ctx context.Context) error {
 			continue
 		}
 
-		// Try to resolve custom slash commands for unrecognized /commands.
+		// Try to resolve custom slash commands or skill slash commands for unrecognized /commands.
 		if strings.HasPrefix(input, "/") {
 			parts := strings.Fields(input)
 			cmdName := strings.TrimPrefix(parts[0], "/")
 			args := parts[1:]
-			if resolved, err := r.customCmds.Resolve(cmdName, args); err == nil {
+
+			// Check if cmdName matches an available skill (e.g. /loop, /stuck, /verify, /debug, etc.)
+			var matchedSkill *skills.Skill
+			for i := range r.skills {
+				if strings.EqualFold(r.skills[i].Name, cmdName) {
+					matchedSkill = &r.skills[i]
+					break
+				}
+			}
+			if matchedSkill != nil {
+				r.activateSkill(matchedSkill)
+				if len(args) == 0 {
+					continue
+				}
+				input = strings.Join(args, " ")
+			} else if resolved, err := r.customCmds.Resolve(cmdName, args); err == nil {
 				input = resolved
 			} else if !strings.Contains(err.Error(), "unknown command") {
 				// Known command but bad args — show error and re-prompt.
 				fmt.Fprintf(r.writer, "Error: %v\n", err)
 				continue
+			} else {
+				fmt.Fprintf(r.writer, "Unknown command: /%s. Type /help or /skill for available commands.\n", cmdName)
+				continue
 			}
-			// If "unknown command", fall through — treat as normal input.
 		}
 
 		// Feature 4: @general subagent inline — rewrite prompt for orchestrator
@@ -559,6 +577,7 @@ func extractImagePath(input string) string {
 func (r *REPL) handleSkillCommand(input string) {
 	trimmed := strings.TrimSpace(input)
 	arg := strings.TrimSpace(strings.TrimPrefix(trimmed, "/skill"))
+	arg = strings.TrimPrefix(arg, "/")
 
 	if arg == "" {
 		// List all available skills.
@@ -576,7 +595,7 @@ func (r *REPL) handleSkillCommand(input string) {
 	// Look up the skill by name.
 	var found *skills.Skill
 	for i := range r.skills {
-		if r.skills[i].Name == arg {
+		if strings.EqualFold(r.skills[i].Name, arg) {
 			found = &r.skills[i]
 			break
 		}
@@ -586,14 +605,16 @@ func (r *REPL) handleSkillCommand(input string) {
 		return
 	}
 
-	// Activate by injecting the skill's system prompt as a user message.
-	activationMsg := fmt.Sprintf("The following skill has been activated: %s. Apply these guidelines:\n\n%s", found.Name, found.SystemPrompt)
-	_, err := r.runtime.SendUserMessage(context.Background(), activationMsg)
-	if err != nil {
-		fmt.Fprintf(r.writer, "Error activating skill: %v\n", err)
+	r.activateSkill(found)
+}
+
+// activateSkill activates a skill by appending its guidelines to the runtime system prompt.
+func (r *REPL) activateSkill(found *skills.Skill) {
+	if found == nil {
 		return
 	}
-	fmt.Fprintf(r.writer, "Skill %s%s%s activated.\n", cGreen+ansiBold, found.Name, ansiReset)
+	r.runtime.AppendSystemPrompt(fmt.Sprintf("# Active Skill: %s\n\n%s", found.Name, found.SystemPrompt))
+	fmt.Fprintf(r.writer, "Skill %s%s%s activated. %s\n", cGreen+ansiBold, found.Name, ansiReset, truncateSkillDesc(found.SystemPrompt, 80))
 }
 
 // truncateSkillDesc shortens a string to maxLen characters, appending "..." if truncated.
@@ -1338,6 +1359,13 @@ When making code changes or writing new code:
 5. NEVER say "Let me know if you'd like me to..." or "Would you like me to..." — just do it.
 6. NEVER ask "Shall I proceed?" or "Should I continue?" — just proceed.
 
+# Conversation Memory & Continuity
+
+- You are interacting in a continuous multi-turn chat session with the user.
+- You have full access to all previous messages in the conversation history above.
+- When the user asks "what did I tell you", asks about previous turns, or refers to earlier discussion, ALWAYS inspect and answer directly from the conversation history above.
+- NEVER claim that you cannot remember or access past conversations within this session.
+
 # Environment
 
 - Working directory: %s
@@ -1386,6 +1414,17 @@ If the first search doesn't give a clear answer, you MUST search again with a di
 	_ = memStore.Load()
 	if mems := memStore.Render(); mems != "" {
 		sb.WriteString("\n\n# Persistent Memory\n\n" + mems)
+	}
+
+	// Inject structured persistent memories from .gocode/memory/ (memdir)
+	mdStore := memdir.NewStore()
+	if relMems, err := mdStore.FindRelevant("", 10); err == nil && len(relMems) > 0 {
+		var mdSb strings.Builder
+		mdSb.WriteString("\n\n# Project Memory Entries (from .gocode/memory/)\n\n")
+		for _, m := range relMems {
+			mdSb.WriteString(fmt.Sprintf("- [%s] %s\n", m.Scope, m.Content))
+		}
+		sb.WriteString(mdSb.String())
 	}
 
 	return sb.String()
