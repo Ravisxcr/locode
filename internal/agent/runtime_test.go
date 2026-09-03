@@ -583,3 +583,54 @@ func (m *mockDetailedCallback) OnToolEndWithResult(name string, success bool, ou
 		m.onEndWithResult(name, success, output)
 	}
 }
+
+type mockToolExecutor struct {
+	calls int
+}
+
+func (m *mockToolExecutor) Execute(name string, input map[string]interface{}) apitypes.ToolResult {
+	m.calls++
+	return apitypes.ToolResult{Output: "No results found"}
+}
+
+func (m *mockToolExecutor) ListTools() []apitypes.ToolDef {
+	return []apitypes.ToolDef{{Name: "websearchtool"}}
+}
+
+func TestRuntime_LoopDetection(t *testing.T) {
+	mockExec := &mockToolExecutor{}
+
+	rt := NewConversationRuntime(RuntimeOptions{
+		Executor: mockExec,
+	})
+
+	// First execution of tool
+	res1 := rt.executeTool(toolUseInfo{
+		id:    "call_1",
+		name:  "websearchtool",
+		input: []byte(`{"query":"what is this project about?"}`),
+	})
+	if res1.IsError {
+		t.Fatalf("first execution should succeed, got error: %s", res1.Output)
+	}
+	if mockExec.calls != 1 {
+		t.Fatalf("expected 1 execution, got %d", mockExec.calls)
+	}
+
+	// Second identical execution of tool in the same turn -> loop detected!
+	res2 := rt.executeTool(toolUseInfo{
+		id:    "call_2",
+		name:  "websearchtool",
+		input: []byte(`{"query":"what is this project about?"}`),
+	})
+	if !res2.IsError {
+		t.Fatalf("second identical execution should trigger loop error, got: %s", res2.Output)
+	}
+	if !strings.Contains(res2.Output, "Loop detected") {
+		t.Errorf("expected loop detection message, got: %s", res2.Output)
+	}
+	// Verify mock was not called a second time
+	if mockExec.calls != 1 {
+		t.Errorf("mock executor should not be invoked when loop detected, calls=%d", mockExec.calls)
+	}
+}

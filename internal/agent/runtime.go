@@ -58,6 +58,7 @@ type ConversationRuntime struct {
 	hooks        HookRunner
 	usage        UsageTracker
 	toolCb       ToolCallback
+	recentToolSigs []string
 }
 
 // NewConversationRuntime creates a new runtime from options.
@@ -97,12 +98,14 @@ func NewConversationRuntime(opts RuntimeOptions) *ConversationRuntime {
 
 // SendUserMessage runs the full agent loop: send prompt, execute tools, loop until done.
 func (r *ConversationRuntime) SendUserMessage(ctx context.Context, text string) (*apitypes.MessageResponse, error) {
+	r.recentToolSigs = nil
 	r.session = append(r.session, apitypes.UserText(text))
 	return r.sendLoop(ctx)
 }
 
 // SendWithMessage runs the full agent loop with a pre-built message (for multimodal input).
 func (r *ConversationRuntime) SendWithMessage(ctx context.Context, msg apitypes.InputMessage) (*apitypes.MessageResponse, error) {
+	r.recentToolSigs = nil
 	r.session = append(r.session, msg)
 	return r.sendLoop(ctx)
 }
@@ -187,12 +190,14 @@ func (r *ConversationRuntime) sendLoop(ctx context.Context) (*apitypes.MessageRe
 // Returns a channel that emits StreamEvents for the current turn.
 // For multi-turn tool loops, it internally handles tool execution and re-streams.
 func (r *ConversationRuntime) StreamUserMessage(ctx context.Context, text string) (<-chan apitypes.StreamEvent, error) {
+	r.recentToolSigs = nil
 	r.session = append(r.session, apitypes.UserText(text))
 	return r.streamLoop(ctx)
 }
 
 // StreamWithMessage runs the agent loop with streaming for a pre-built message (for multimodal input).
 func (r *ConversationRuntime) StreamWithMessage(ctx context.Context, msg apitypes.InputMessage) (<-chan apitypes.StreamEvent, error) {
+	r.recentToolSigs = nil
 	r.session = append(r.session, msg)
 	return r.streamLoop(ctx)
 }
@@ -529,6 +534,32 @@ func (r *ConversationRuntime) executeTool(tu toolUseInfo) apitypes.ToolResult {
 		inputMap = make(map[string]interface{})
 	}
 	inputStr, _ := json.Marshal(inputMap)
+
+	// Loop detection: prevent identical repeated tool calls in the same turn
+	sig := fmt.Sprintf("%s:%s", strings.ToLower(tu.name), string(inputStr))
+	repeatCount := 0
+	for _, prev := range r.recentToolSigs {
+		if prev == sig {
+			repeatCount++
+		}
+	}
+	r.recentToolSigs = append(r.recentToolSigs, sig)
+
+	// Block immediately if WebSearchTool repeats identical query, or if any tool repeats 3+ times
+	isWebSearch := strings.EqualFold(tu.name, "websearchtool") || strings.EqualFold(tu.name, "web_search")
+	if (isWebSearch && repeatCount >= 1) || repeatCount >= 2 {
+		loopMsg := fmt.Sprintf("Loop detected: identical tool call %q with arguments %s was already executed in this turn. You MUST NOT repeat identical tool calls. If exploring, reviewing, or documenting this project, use local repository tools (FileReadTool, ListDirectoryTool, GlobTool, GrepTool, rag_search) or synthesize your response directly without calling this tool again.", tu.name, string(inputStr))
+		if dtc, ok := r.toolCb.(DetailedToolCallback); ok {
+			dtc.OnToolEndWithResult(tu.name, false, loopMsg)
+		} else {
+			r.toolCb.OnToolEnd(tu.name, false)
+		}
+		return apitypes.ToolResult{
+			ToolUseID: tu.id,
+			Output:    loopMsg,
+			IsError:   true,
+		}
+	}
 
 	// Notify UI that a tool is about to run (stops spinner, shows tool name)
 	r.toolCb.OnToolStart(tu.name, inputMap)

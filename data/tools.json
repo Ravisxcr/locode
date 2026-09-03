@@ -115,8 +115,8 @@
   },
   {
     "name": "WebSearchTool",
-    "responsibility": "search the web",
-    "description": "Search for information across Wikipedia, GitHub, Reddit, Hacker News, and StackOverflow in parallel. Returns articles, repos, discussions, and Q&A. No API key required.",
+    "responsibility": "search the public web for external libraries and programming facts",
+    "description": "Search for public information across Wikipedia, GitHub, Reddit, Hacker News, and StackOverflow in parallel. Use ONLY for external public web lookups (general programming language documentation, external third-party libraries, public CVEs). Do NOT use this tool to search for files, code, architecture, or documentation in the current local project workspace.",
     "source_hint": "tools/web",
     "input_schema": {
       "type": "object",
