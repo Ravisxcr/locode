@@ -1,6 +1,6 @@
 # gocode
 
-An open-source, terminal-native AI coding agent built in Go. Inspired by Claude Code, engineered for speed, and powered by **Ollama**, **LangChain-style Codebase RAG**, and **11+ LLM providers**.
+An open-source, terminal-native AI coding agent built in Go. Based on the original [AlleyBo55/gocode](https://github.com/AlleyBo55/gocode), inspired by Claude Code, engineered for speed, and powered by **Ollama**, **LangChain-style Codebase RAG**, and **11+ LLM providers**.
 
 ---
 
@@ -135,6 +135,12 @@ gocode/
     ├── session/         # Session persistence and recovery
     └── toolimpl/        # Built-in tool implementations (file, bash, git, RAG)
 ```
+
+---
+
+## Credits & Acknowledgements
+
+Special thanks to [AlleyBo55](https://github.com/AlleyBo55) for the original [gocode](https://github.com/AlleyBo55/gocode) repository, which provided the foundational architecture and inspiration for this project.
 
 ---
 

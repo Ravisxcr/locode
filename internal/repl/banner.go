@@ -57,11 +57,11 @@ func PrintBanner(w io.Writer, cfg BannerConfig) {
 
 	// ASCII art logo in Go blue
 	logo := []string{
-		goBlueC + `   ██████   ██████   ██████  ██████  ██████  ███████` + reset,
-		goBlueC + `  ██       ██    ██ ██      ██    ██ ██   ██ ██     ` + reset,
-		goBlueC + `  ██   ███ ██    ██ ██      ██    ██ ██   ██ █████  ` + reset,
-		goBlueC + `  ██    ██ ██    ██ ██      ██    ██ ██   ██ ██     ` + reset,
-		goBlueC + `   ██████   ██████   ██████  ██████  ██████  ███████` + reset,
+		goBlueC + `  ██       ██████   ██████  ██████   ██████  ███████` + reset,
+		goBlueC + `  ██      ██    ██ ██      ██    ██ ██    ██ ██     ` + reset,
+		goBlueC + `  ██      ██    ██ ██      ██    ██ ██    ██ █████  ` + reset,
+		goBlueC + `  ██      ██    ██ ██      ██    ██ ██    ██ ██     ` + reset,
+		goBlueC + `  ███████  ██████   ██████  ██████   ██████  ███████` + reset,
 	}
 
 	fmt.Fprintln(w)
@@ -103,6 +103,7 @@ func PrintBanner(w io.Writer, cfg BannerConfig) {
 		{"/status", "session info"},
 		{"/undo", "stash changes"},
 		{"/doctor", "check env"},
+		{"/commit", "git commit"},
 	}
 
 	for i := 0; i < len(cmds); i += 2 {
